@@ -1,0 +1,970 @@
+//@version=6
+indicator("SNAP HTF_LTF v1.4", shorttitle="SNAP HTF_LTF", overlay=true,
+     max_lines_count=500, max_boxes_count=500, max_labels_count=200,
+     max_bars_back=600)
+
+//------------------------------------------------------------------------------
+// SNAP HTF_LTF
+// Top-down framework: Weekly -> Daily -> 4H -> 1H -> execution timeframes.
+//
+// IMPORTANT:
+// Terms such as "institutional liquidity", "high-probability BOS", breaker
+// blocks, and inefficiencies are discretionary concepts. This script converts
+// them into explicit, testable proxy rules. Tune the pivot, tolerance, and
+// lookback inputs to the instrument being studied.
+//------------------------------------------------------------------------------
+
+//==============================================================================
+// Inputs
+//==============================================================================
+
+string G_GENERAL = "01. General"
+string G_WEEKLY  = "02. Weekly framework"
+string G_DAILY   = "03. Daily / 20-day framework"
+string G_H4      = "04. Four-hour framework"
+string G_H1      = "05. Sunday-Monday 1H range"
+string G_STYLE   = "06. Object sizing and placement"
+string G_DASH    = "07. Dashboard"
+
+bool showWeekly       = input.bool(true,  "Show weekly framework", group=G_GENERAL)
+bool showDaily        = input.bool(true,  "Show daily framework", group=G_GENERAL)
+bool showH4           = input.bool(true,  "Show 4H framework", group=G_GENERAL)
+bool showH1Projection = input.bool(true,  "Show Sunday-Monday projections", group=G_GENERAL)
+bool showDashboard    = input.bool(true,  "Show dashboard", group=G_GENERAL)
+
+int swingLeft   = input.int(3, "Pivot bars left", minval=1, maxval=20, group=G_GENERAL)
+int swingRight  = input.int(3, "Pivot bars right", minval=1, maxval=20, group=G_GENERAL)
+float eqAtrTol  = input.float(0.12, "Equal high/low tolerance (ATR multiple)",
+     minval=0.01, maxval=1.0, step=0.01, group=G_GENERAL)
+
+int weeklyLookback = input.int(104, "Weekly major range lookback (weeks)",
+     minval=20, maxval=520, group=G_WEEKLY)
+bool showWeeklyWickDRT = input.bool(true, "Grade premium weekly wick", group=G_WEEKLY)
+bool showWeeklyFVG     = input.bool(true, "Show latest weekly sell-side inefficiencies", group=G_WEEKLY)
+bool showWeeklyBOS     = input.bool(true, "Show high-probability bearish BOS proxy", group=G_WEEKLY)
+bool showWeeklyEQ      = input.bool(true, "Show weekly equal highs/lows", group=G_WEEKLY)
+bool showLiquidityHighs = input.bool(true, "Show latest weekly liquidity highs", group=G_WEEKLY)
+
+int dailyLookback = input.int(20, "Daily dealing range lookback (trading days)",
+     minval=5, maxval=100, group=G_DAILY)
+bool showDailyDRT       = input.bool(true, "Show daily DRT box", group=G_DAILY)
+bool showDailyLookback  = input.bool(true, "Show vertical daily lookback line", group=G_DAILY)
+bool showDailyFVG       = input.bool(true, "Show daily buy/sell imbalances", group=G_DAILY)
+bool showDailyBOS       = input.bool(true, "Show bullish daily BOS proxy", group=G_DAILY)
+bool showMinorBuyside   = input.bool(true, "Show nested minor buyside liquidity", group=G_DAILY)
+bool showEqualLows      = input.bool(true, "Show equal lows / institutional level", group=G_DAILY)
+bool showBreakawayGap   = input.bool(true, "Show daily breakaway gap proxy", group=G_DAILY)
+bool showBelowEQLGap    = input.bool(true, "Show latest imbalance below equal lows", group=G_DAILY)
+
+bool showH4FVG        = input.bool(true, "Show 4H buy/sell imbalances", group=G_H4)
+bool showBearBreaker  = input.bool(true, "Show bearish 4H breaker proxy", group=G_H4)
+bool showBullBreaker  = input.bool(false, "Show bullish 4H breaker proxy", group=G_H4)
+
+string rangeTimezone = input.string("America/New_York", "Sunday/Monday range timezone", group=G_H1)
+int projectionCount  = input.int(6, "Number of deviations", minval=1, maxval=6, group=G_H1)
+string projectionSide = input.string("Above only", "Projection direction",
+     options=["Above only", "Below only", "Both"], group=G_H1)
+int projectionHours = input.int(168, "Projection width (hours)",
+     minval=12, maxval=720, group=G_H1)
+bool showOpeningRangeMid = input.bool(true, "Show 50% of Sunday-Monday range", group=G_H1)
+
+int lineBarsBack = input.int(80, "Horizontal line length left (bars)",
+     minval=5, maxval=400, group=G_STYLE)
+int lineBarsForward = input.int(30, "Horizontal line length right (bars)",
+     minval=0, maxval=400, group=G_STYLE)
+int weeklyBoxWidth = input.int(45, "Weekly DRT width (bars)",
+     minval=10, maxval=250, group=G_STYLE)
+int weeklyBoxOffset = input.int(20, "Weekly DRT horizontal offset; negative = left",
+     minval=-300, maxval=300, group=G_STYLE)
+int dailyBoxWidth = input.int(55, "Daily DRT width (bars)",
+     minval=10, maxval=250, group=G_STYLE)
+int dailyBoxOffset = input.int(-45, "Daily DRT horizontal offset; negative = left",
+     minval=-300, maxval=300, group=G_STYLE)
+int zonePastDays = input.int(240, "Trim zone history to latest N calendar days",
+     minval=20, maxval=1500, group=G_STYLE)
+int zoneFutureDays = input.int(30, "Extend imbalance/breaker zones into future (days)",
+     minval=0, maxval=365, group=G_STYLE)
+
+color majorLiquidityColor = input.color(color.orange, "Major liquidity line", group=G_STYLE)
+color majorDayColor       = input.color(color.rgb(235, 145, 160), "Major day high/low", group=G_STYLE)
+color bosColor            = input.color(color.red, "BOS line", group=G_STYLE)
+color liquidityHighColor  = input.color(color.aqua, "Liquidity-high line", group=G_STYLE)
+color dailyImbalanceColor = input.color(color.rgb(115, 155, 215), "Daily imbalance fill", group=G_STYLE)
+color h4ImbalanceColor    = input.color(color.rgb(90, 170, 180), "4H imbalance fill", group=G_STYLE)
+color breakawayColor      = input.color(color.green, "Breakaway gap fill", group=G_STYLE)
+
+int dashboardRows = 7
+
+//==============================================================================
+// Constants
+//==============================================================================
+
+int MS_HOUR = 60 * 60 * 1000
+int MS_DAY  = 24 * MS_HOUR
+
+//==============================================================================
+// Analytical functions, evaluated inside request.security()
+//==============================================================================
+
+f_week_pack(_lookback) =>
+    // ta.highestbars() returns a negative bar offset, while the history
+    // operator [] requires a non-negative number of bars back.
+    int highestOffset = ta.highestbars(high, _lookback)
+    int barsBack = not na(highestOffset) ? math.abs(highestOffset) : na
+    float majorHi = ta.highest(high, _lookback)
+    float majorLo = ta.lowest(low, _lookback)
+    float wickHi = not na(barsBack) ? high[barsBack] : na
+    float wickBase = not na(barsBack) ? math.max(open[barsBack], close[barsBack]) : na
+    [majorHi, majorLo, wickHi, wickBase]
+
+f_equal_high(_left, _right, _tolAtr) =>
+    float ph = ta.pivothigh(high, _left, _right)
+    float prev = ta.valuewhen(not na(ph), ph, 1)
+    bool matched = not na(ph) and not na(prev) and math.abs(ph - prev) <= ta.atr(14) * _tolAtr
+    float eq = matched ? (ph + prev) * 0.5 : na
+    ta.valuewhen(not na(eq), eq, 0)
+
+f_equal_low(_left, _right, _tolAtr) =>
+    float pl = ta.pivotlow(low, _left, _right)
+    float prev = ta.valuewhen(not na(pl), pl, 1)
+    bool matched = not na(pl) and not na(prev) and math.abs(pl - prev) <= ta.atr(14) * _tolAtr
+    float eq = matched ? (pl + prev) * 0.5 : na
+    ta.valuewhen(not na(eq), eq, 0)
+
+f_pivot_high(_left, _right, _occurrence) =>
+    float ph = ta.pivothigh(high, _left, _right)
+    ta.valuewhen(not na(ph), ph, _occurrence)
+
+f_bear_fvg(_occurrence) =>
+    bool cond = high < low[2]
+    float top = ta.valuewhen(cond, low[2], _occurrence)
+    float bottom = ta.valuewhen(cond, high, _occurrence)
+    int started = ta.valuewhen(cond, time, _occurrence)
+    [top, bottom, started]
+
+f_bull_fvg(_occurrence) =>
+    bool cond = low > high[2]
+    float top = ta.valuewhen(cond, low, _occurrence)
+    float bottom = ta.valuewhen(cond, high[2], _occurrence)
+    int started = ta.valuewhen(cond, time, _occurrence)
+    [top, bottom, started]
+
+// Bearish BOS proxy:
+// 1) A confirmed pivot high is raided.
+// 2) The last confirmed swing low is armed.
+// 3) Price closes below that low with a recent bearish FVG.
+f_bear_bos(_left, _right) =>
+    float ph = ta.pivothigh(high, _left, _right)
+    float pl = ta.pivotlow(low, _left, _right)
+
+    var float lastPh = na
+    var float lastPl = na
+    var float usedPh = na
+    var float armedLow = na
+    var float bos = na
+
+    if not na(ph)
+        lastPh := ph
+    if not na(pl)
+        lastPl := pl
+
+    bool freshRaid = not na(lastPh) and high > lastPh and (na(usedPh) or lastPh != usedPh)
+    if freshRaid and not na(lastPl)
+        usedPh := lastPh
+        armedLow := lastPl
+
+    bool bearFvg = high < low[2]
+    bool recentBearFvg = bearFvg or bearFvg[1]
+    if not na(armedLow) and close < armedLow and recentBearFvg
+        bos := armedLow
+        armedLow := na
+
+    bos
+
+// Bullish BOS proxy:
+// 1) A confirmed pivot low is raided.
+// 2) The last confirmed swing high is armed.
+// 3) Price closes above that high with a recent bullish FVG.
+f_bull_bos(_left, _right) =>
+    float ph = ta.pivothigh(high, _left, _right)
+    float pl = ta.pivotlow(low, _left, _right)
+
+    var float lastPh = na
+    var float lastPl = na
+    var float usedPl = na
+    var float armedHigh = na
+    var float bos = na
+
+    if not na(ph)
+        lastPh := ph
+    if not na(pl)
+        lastPl := pl
+
+    bool freshRaid = not na(lastPl) and low < lastPl and (na(usedPl) or lastPl != usedPl)
+    if freshRaid and not na(lastPh)
+        usedPl := lastPl
+        armedHigh := lastPh
+
+    bool bullFvg = low > high[2]
+    bool recentBullFvg = bullFvg or bullFvg[1]
+    if not na(armedHigh) and close > armedHigh and recentBullFvg
+        bos := armedHigh
+        armedHigh := na
+
+    bos
+
+f_minor_buyside(_lookback, _left, _right) =>
+    float majorHi = ta.highest(high, _lookback)
+    float ph = ta.pivothigh(high, _left, _right)
+    bool nested = not na(ph) and ph < majorHi
+    ta.valuewhen(nested, ph, 0)
+
+f_daily_pack(_lookback) =>
+    float hi = ta.highest(high, _lookback)
+    float lo = ta.lowest(low, _lookback)
+    int lookbackTime = time[_lookback]
+    [hi, lo, lookbackTime]
+
+f_breakaway_gap(_lookback) =>
+    float priorHi = ta.highest(high[1], _lookback)
+    float priorLo = ta.lowest(low[1], _lookback)
+    float mid = priorLo + (priorHi - priorLo) * 0.5
+    bool bullGap = low > high[2]
+    bool displaced = bullGap and close > mid and close[1] <= mid
+    float top = ta.valuewhen(displaced, low, 0)
+    float bottom = ta.valuewhen(displaced, high[2], 0)
+    int started = ta.valuewhen(displaced, time, 0)
+    [top, bottom, started]
+
+f_imbalance_below_equal_lows(_left, _right, _tolAtr) =>
+    float pl = ta.pivotlow(low, _left, _right)
+    float prev = ta.valuewhen(not na(pl), pl, 1)
+    bool matched = not na(pl) and not na(prev) and math.abs(pl - prev) <= ta.atr(14) * _tolAtr
+    float newEq = matched ? (pl + prev) * 0.5 : na
+    float eq = ta.valuewhen(not na(newEq), newEq, 0)
+
+    bool bearGap = not na(eq) and high < low[2] and low[2] < eq
+    bool bullGap = not na(eq) and low > high[2] and low < eq
+    bool cond = bearGap or bullGap
+
+    float candidateTop = bearGap ? low[2] : bullGap ? low : na
+    float candidateBottom = bearGap ? high : bullGap ? high[2] : na
+
+    float top = ta.valuewhen(cond, candidateTop, 0)
+    float bottom = ta.valuewhen(cond, candidateBottom, 0)
+    int started = ta.valuewhen(cond, time, 0)
+    [top, bottom, started]
+
+// Bearish 4H breaker proxy:
+// Raid a confirmed high, then close below the armed swing low.
+// The zone is the last up-close candle before the break.
+f_bear_breaker(_left, _right) =>
+    float ph = ta.pivothigh(high, _left, _right)
+    float pl = ta.pivotlow(low, _left, _right)
+
+    var float lastPh = na
+    var float lastPl = na
+    var float usedPh = na
+    var float armedLow = na
+    var float candidateTop = na
+    var float candidateBottom = na
+
+    var float zoneTop = na
+    var float zoneBottom = na
+    var int zoneTime = na
+
+    if not na(ph)
+        lastPh := ph
+    if not na(pl)
+        lastPl := pl
+
+    bool freshRaid = not na(lastPh) and high > lastPh and (na(usedPh) or lastPh != usedPh)
+    if freshRaid and not na(lastPl)
+        usedPh := lastPh
+        armedLow := lastPl
+        candidateTop := close >= open ? high : na
+        candidateBottom := close >= open ? low : na
+
+    if not na(armedLow) and close >= open
+        candidateTop := high
+        candidateBottom := low
+
+    if not na(armedLow) and close < armedLow and not na(candidateTop)
+        zoneTop := candidateTop
+        zoneBottom := candidateBottom
+        zoneTime := time
+        armedLow := na
+
+    [zoneTop, zoneBottom, zoneTime]
+
+// Bullish mirror:
+// Raid a confirmed low, then close above the armed swing high.
+// The zone is the last down-close candle before the break.
+f_bull_breaker(_left, _right) =>
+    float ph = ta.pivothigh(high, _left, _right)
+    float pl = ta.pivotlow(low, _left, _right)
+
+    var float lastPh = na
+    var float lastPl = na
+    var float usedPl = na
+    var float armedHigh = na
+    var float candidateTop = na
+    var float candidateBottom = na
+
+    var float zoneTop = na
+    var float zoneBottom = na
+    var int zoneTime = na
+
+    if not na(ph)
+        lastPh := ph
+    if not na(pl)
+        lastPl := pl
+
+    bool freshRaid = not na(lastPl) and low < lastPl and (na(usedPl) or lastPl != usedPl)
+    if freshRaid and not na(lastPh)
+        usedPl := lastPl
+        armedHigh := lastPh
+        candidateTop := close <= open ? high : na
+        candidateBottom := close <= open ? low : na
+
+    if not na(armedHigh) and close <= open
+        candidateTop := high
+        candidateBottom := low
+
+    if not na(armedHigh) and close > armedHigh and not na(candidateTop)
+        zoneTop := candidateTop
+        zoneBottom := candidateBottom
+        zoneTime := time
+        armedHigh := na
+
+    [zoneTop, zoneBottom, zoneTime]
+
+// Sunday 18:00 through Monday 00:00 opening range, calculated on 1H bars.
+f_sunday_monday_range(_timezone) =>
+    int d = dayofweek(time, _timezone)
+    int h = hour(time, _timezone)
+
+    bool isStart = d == dayofweek.sunday and h == 18
+    bool isEnd = d == dayofweek.monday and h == 0
+
+    var bool active = false
+    var float rangeHigh = na
+    var float rangeLow = na
+    var int startTime = na
+    var int endTime = na
+
+    if isStart
+        active := true
+        rangeHigh := high
+        rangeLow := low
+        startTime := time
+        endTime := na
+    else if active and isEnd
+        active := false
+        endTime := time
+    else if active
+        rangeHigh := math.max(rangeHigh, high)
+        rangeLow := math.min(rangeLow, low)
+
+    int effectiveEnd = active ? time_close : endTime
+    [rangeHigh, rangeLow, startTime, effectiveEnd]
+
+//==============================================================================
+// Drawing helpers
+//==============================================================================
+
+f_draw_level(array<line> _lines, array<label> _labels, int _idx, bool _show,
+     int _x1, int _x2, float _y, string _text, color _color, int _width, _style) =>
+    line ln = array.get(_lines, _idx)
+    label lb = array.get(_labels, _idx)
+    bool valid = _show and not na(_y)
+
+    if valid
+        if na(ln)
+            ln := line.new(x1=_x1, y1=_y, x2=_x2, y2=_y, xloc=xloc.bar_index,
+                 color=_color, width=_width, style=_style)
+            array.set(_lines, _idx, ln)
+        else
+            line.set_xy1(ln, _x1, _y)
+            line.set_xy2(ln, _x2, _y)
+            line.set_color(ln, _color)
+            line.set_width(ln, _width)
+            line.set_style(ln, _style)
+
+        if na(lb)
+            lb := label.new(x=_x2, y=_y, text=_text, xloc=xloc.bar_index,
+                 style=label.style_label_left, color=color.new(color.black, 72),
+                 textcolor=_color, size=size.tiny)
+            array.set(_labels, _idx, lb)
+        else
+            label.set_x(lb, _x2)
+            label.set_y(lb, _y)
+            label.set_text(lb, _text)
+            label.set_textcolor(lb, _color)
+            label.set_color(lb, color.new(color.black, 72))
+    else
+        if not na(ln)
+            line.delete(ln)
+            array.set(_lines, _idx, na)
+        if not na(lb)
+            label.delete(lb)
+            array.set(_labels, _idx, na)
+
+f_draw_drt(array<box> _boxes, array<line> _lines, bool _show,
+     int _x1, int _x2, float _low, float _high, string _title) =>
+    bool valid = _show and not na(_low) and not na(_high) and _high > _low
+    float drtRange = _high - _low
+
+    for i = 0 to 3
+        box bx = array.get(_boxes, i)
+        if valid
+            float bottom = _low + drtRange * (i * 0.25)
+            float top = _low + drtRange * ((i + 1) * 0.25)
+            color bandFill = i == 0 ? color.new(color.yellow, 90) :
+                 i == 1 ? color.new(color.green, 90) :
+                 i == 2 ? color.new(color.blue, 90) :
+                 color.new(color.gray, 92)
+            string bandText = i == 3 ? _title + "\n0.75-1.00" :
+                 i == 2 ? "0.50-0.75" :
+                 i == 1 ? "0.25-0.50" : "0.00-0.25"
+
+            if na(bx)
+                bx := box.new(left=_x1, top=top, right=_x2, bottom=bottom,
+                     xloc=xloc.bar_index, border_color=color.new(color.white, 35),
+                     bgcolor=bandFill, text=bandText, text_color=color.new(color.white, 15),
+                     text_size=size.tiny)
+                array.set(_boxes, i, bx)
+            else
+                box.set_left(bx, _x1)
+                box.set_right(bx, _x2)
+                box.set_top(bx, top)
+                box.set_bottom(bx, bottom)
+                box.set_border_color(bx, color.new(color.white, 35))
+                box.set_bgcolor(bx, bandFill)
+                box.set_text(bx, bandText)
+                box.set_text_color(bx, color.new(color.white, 15))
+        else
+            if not na(bx)
+                box.delete(bx)
+                array.set(_boxes, i, na)
+
+    for i = 0 to 4
+        line ln = array.get(_lines, i)
+        if valid
+            float y = _low + drtRange * (i * 0.25)
+            color clr = i == 1 ? color.yellow :
+                 i == 2 ? color.green :
+                 i == 3 ? color.blue : color.white
+            if na(ln)
+                ln := line.new(x1=_x1, y1=y, x2=_x2, y2=y, xloc=xloc.bar_index,
+                     color=clr, width=i == 0 or i == 4 ? 2 : 1)
+                array.set(_lines, i, ln)
+            else
+                line.set_xy1(ln, _x1, y)
+                line.set_xy2(ln, _x2, y)
+                line.set_color(ln, clr)
+                line.set_width(ln, i == 0 or i == 4 ? 2 : 1)
+        else
+            if not na(ln)
+                line.delete(ln)
+                array.set(_lines, i, na)
+
+f_draw_time_zone(array<box> _boxes, array<line> _mids, int _idx, bool _show,
+     int _leftTime, int _rightTime, float _top, float _bottom, string _text,
+     color _border, color _fill) =>
+    box bx = array.get(_boxes, _idx)
+    line mid = array.get(_mids, _idx)
+    bool valid = _show and not na(_leftTime) and not na(_rightTime) and
+         not na(_top) and not na(_bottom) and _top > _bottom
+
+    if valid
+        float middle = (_top + _bottom) * 0.5
+        if na(bx)
+            bx := box.new(left=_leftTime, top=_top, right=_rightTime, bottom=_bottom,
+                 xloc=xloc.bar_time, border_color=_border, bgcolor=_fill,
+                 text=_text, text_color=color.white, text_size=size.tiny)
+            array.set(_boxes, _idx, bx)
+        else
+            box.set_left(bx, _leftTime)
+            box.set_right(bx, _rightTime)
+            box.set_top(bx, _top)
+            box.set_bottom(bx, _bottom)
+            box.set_border_color(bx, _border)
+            box.set_bgcolor(bx, _fill)
+            box.set_text(bx, _text)
+            box.set_text_color(bx, color.white)
+
+        if na(mid)
+            mid := line.new(x1=_leftTime, y1=middle, x2=_rightTime, y2=middle,
+                 xloc=xloc.bar_time, color=color.new(_border, 5),
+                 style=line.style_dashed, width=1)
+            array.set(_mids, _idx, mid)
+        else
+            line.set_xy1(mid, _leftTime, middle)
+            line.set_xy2(mid, _rightTime, middle)
+            line.set_color(mid, color.new(_border, 5))
+            line.set_style(mid, line.style_dashed)
+    else
+        if not na(bx)
+            box.delete(bx)
+            array.set(_boxes, _idx, na)
+        if not na(mid)
+            line.delete(mid)
+            array.set(_mids, _idx, na)
+
+f_draw_time_line(array<line> _lines, int _idx, bool _show,
+     int _x1, float _y1, int _x2, float _y2, color _color, int _width, _style) =>
+    line ln = array.get(_lines, _idx)
+    bool valid = _show and not na(_x1) and not na(_x2) and not na(_y1) and not na(_y2)
+
+    if valid
+        if na(ln)
+            ln := line.new(x1=_x1, y1=_y1, x2=_x2, y2=_y2, xloc=xloc.bar_time,
+                 color=_color, width=_width, style=_style)
+            array.set(_lines, _idx, ln)
+        else
+            line.set_xy1(ln, _x1, _y1)
+            line.set_xy2(ln, _x2, _y2)
+            line.set_color(ln, _color)
+            line.set_width(ln, _width)
+            line.set_style(ln, _style)
+    else
+        if not na(ln)
+            line.delete(ln)
+            array.set(_lines, _idx, na)
+
+f_draw_projection(array<box> _boxes, array<line> _mids, bool _show,
+     bool _above, int _count, int _leftTime, int _rightTime,
+     float _rangeLow, float _rangeSize) =>
+    for i = 0 to 5
+        box bx = array.get(_boxes, i)
+        line mid = array.get(_mids, i)
+        bool activeZone = _show and i < _count and not na(_leftTime) and
+             not na(_rightTime) and not na(_rangeLow) and _rangeSize > 0
+
+        if activeZone
+            float bottom = _above ?
+                 _rangeLow + _rangeSize * i :
+                 _rangeLow - _rangeSize * (i + 1)
+            float top = _above ?
+                 _rangeLow + _rangeSize * (i + 1) :
+                 _rangeLow - _rangeSize * i
+            float middle = (top + bottom) * 0.5
+            string zoneLabel = (_above ? "Zone " : "Sell Zone ") + str.tostring(i + 1)
+
+            if na(bx)
+                bx := box.new(left=_leftTime, top=top, right=_rightTime, bottom=bottom,
+                     xloc=xloc.bar_time, border_color=color.new(color.white, 25),
+                     bgcolor=color.new(color.white, 93), text=zoneLabel,
+                     text_color=color.new(color.white, 5), text_size=size.tiny)
+                array.set(_boxes, i, bx)
+            else
+                box.set_left(bx, _leftTime)
+                box.set_right(bx, _rightTime)
+                box.set_top(bx, top)
+                box.set_bottom(bx, bottom)
+                box.set_text(bx, zoneLabel)
+                box.set_border_color(bx, color.new(color.white, 25))
+                box.set_bgcolor(bx, color.new(color.white, 93))
+
+            if na(mid)
+                mid := line.new(x1=_leftTime, y1=middle, x2=_rightTime, y2=middle,
+                     xloc=xloc.bar_time, color=color.new(color.white, 15),
+                     style=line.style_dashed)
+                array.set(_mids, i, mid)
+            else
+                line.set_xy1(mid, _leftTime, middle)
+                line.set_xy2(mid, _rightTime, middle)
+                line.set_color(mid, color.new(color.white, 15))
+                line.set_style(mid, line.style_dashed)
+        else
+            if not na(bx)
+                box.delete(bx)
+                array.set(_boxes, i, na)
+            if not na(mid)
+                line.delete(mid)
+                array.set(_mids, i, na)
+
+f_grade(_price, _low, _high) =>
+    string result = "n/a"
+    if not na(_price) and not na(_low) and not na(_high) and _high > _low
+        float p = (_price - _low) / (_high - _low)
+        result := p >= 1.0 ? "Above 1.00" :
+             p >= 0.75 ? "0.75-1.00" :
+             p >= 0.50 ? "0.50-0.75" :
+             p >= 0.25 ? "0.25-0.50" :
+             p >= 0.00 ? "0.00-0.25" : "Below 0.00"
+    result
+
+//==============================================================================
+// Higher-timeframe data
+//==============================================================================
+
+// Weekly
+[wMajorHigh, wMajorLow, wWickHigh, wWickBase] = request.security(syminfo.tickerid, "W", f_week_pack(weeklyLookback),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+float wEqHigh = request.security(syminfo.tickerid, "W",
+     f_equal_high(swingLeft, swingRight, eqAtrTol),
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+float wEqLow = request.security(syminfo.tickerid, "W",
+     f_equal_low(swingLeft, swingRight, eqAtrTol),
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+float wBearBos = request.security(syminfo.tickerid, "W",
+     f_bear_bos(swingLeft, swingRight),
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+float wLiqHigh0 = request.security(syminfo.tickerid, "W",
+     f_pivot_high(swingLeft, swingRight, 0),
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+float wLiqHigh1 = request.security(syminfo.tickerid, "W",
+     f_pivot_high(swingLeft, swingRight, 1),
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+[wBearTop0, wBearBottom0, wBearTime0] = request.security(syminfo.tickerid, "W", f_bear_fvg(0),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[wBearTop1, wBearBottom1, wBearTime1] = request.security(syminfo.tickerid, "W", f_bear_fvg(1),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[wBearTop2, wBearBottom2, wBearTime2] = request.security(syminfo.tickerid, "W", f_bear_fvg(2),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+// Daily
+[dMajorHigh, dMajorLow, dLookbackTime] = request.security(syminfo.tickerid, "D", f_daily_pack(dailyLookback),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+float dBullBos = request.security(syminfo.tickerid, "D",
+     f_bull_bos(swingLeft, swingRight),
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+float dMinorBuy = request.security(syminfo.tickerid, "D",
+     f_minor_buyside(dailyLookback, swingLeft, swingRight),
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+float dEqLow = request.security(syminfo.tickerid, "D",
+     f_equal_low(swingLeft, swingRight, eqAtrTol),
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+[dBearTop0, dBearBottom0, dBearTime0] = request.security(syminfo.tickerid, "D", f_bear_fvg(0),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[dBearTop1, dBearBottom1, dBearTime1] = request.security(syminfo.tickerid, "D", f_bear_fvg(1),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[dBullTop0, dBullBottom0, dBullTime0] = request.security(syminfo.tickerid, "D", f_bull_fvg(0),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+[dBreakTop, dBreakBottom, dBreakTime] = request.security(syminfo.tickerid, "D", f_breakaway_gap(dailyLookback),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+[dBelowTop, dBelowBottom, dBelowTime] = request.security(syminfo.tickerid, "D",
+         f_imbalance_below_equal_lows(swingLeft, swingRight, eqAtrTol),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+// Four hour
+[h4BearTop0, h4BearBottom0, h4BearTime0] = request.security(syminfo.tickerid, "240", f_bear_fvg(0),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[h4BearTop1, h4BearBottom1, h4BearTime1] = request.security(syminfo.tickerid, "240", f_bear_fvg(1),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[h4BullTop0, h4BullBottom0, h4BullTime0] = request.security(syminfo.tickerid, "240", f_bull_fvg(0),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+[h4BearBreakerTop, h4BearBreakerBottom, h4BearBreakerTime] = request.security(syminfo.tickerid, "240",
+         f_bear_breaker(swingLeft, swingRight),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+[h4BullBreakerTop, h4BullBreakerBottom, h4BullBreakerTime] = request.security(syminfo.tickerid, "240",
+         f_bull_breaker(swingLeft, swingRight),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+// One hour Sunday-Monday range
+[orHigh, orLow, orStartTime, orEndTime] = request.security(syminfo.tickerid, "60",
+         f_sunday_monday_range(rangeTimezone),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+//==============================================================================
+// Object storage
+//==============================================================================
+
+var array<line> levelLines = array.new_line(24)
+var array<label> levelLabels = array.new_label(24)
+
+var array<box> weeklyDrtBoxes = array.new_box(4)
+var array<line> weeklyDrtLines = array.new_line(5)
+
+var array<box> dailyDrtBoxes = array.new_box(4)
+var array<line> dailyDrtLines = array.new_line(5)
+
+var array<box> zoneBoxes = array.new_box(16)
+var array<line> zoneMids = array.new_line(16)
+
+var array<line> timeLines = array.new_line(8)
+
+var array<box> aboveProjectionBoxes = array.new_box(6)
+var array<line> aboveProjectionMids = array.new_line(6)
+var array<box> belowProjectionBoxes = array.new_box(6)
+var array<line> belowProjectionMids = array.new_line(6)
+
+//==============================================================================
+// Main horizontal levels
+//==============================================================================
+
+int x1 = bar_index - lineBarsBack
+int x2 = bar_index + lineBarsForward
+
+f_draw_level(levelLines, levelLabels, 0, showWeekly, x1, x2, wMajorHigh,
+     "Major Buyside Liquidity Pool (W)", majorLiquidityColor, 2, line.style_solid)
+
+f_draw_level(levelLines, levelLabels, 1, showWeekly, x1, x2, wMajorLow,
+     "Major Sell-side Liquidity Pool (W)", majorLiquidityColor, 2, line.style_solid)
+
+f_draw_level(levelLines, levelLabels, 2, showWeekly and showWeeklyEQ, x1, x2, wEqHigh,
+     "Weekly EQH - strongest buyside draw", color.white, 2, line.style_dashed)
+
+f_draw_level(levelLines, levelLabels, 3, showWeekly and showWeeklyEQ, x1, x2, wEqLow,
+     "Weekly EQL - strongest sell-side draw", color.white, 2, line.style_dashed)
+
+f_draw_level(levelLines, levelLabels, 4, showWeekly and showWeeklyBOS, x1, x2, wBearBos,
+     "BOS (Weekly bearish proxy)", bosColor, 2, line.style_solid)
+
+f_draw_level(levelLines, levelLabels, 5, showWeekly and showLiquidityHighs, x1, x2, wLiqHigh0,
+     "Liquidity High W1", liquidityHighColor, 1, line.style_solid)
+
+f_draw_level(levelLines, levelLabels, 6, showWeekly and showLiquidityHighs, x1, x2, wLiqHigh1,
+     "Liquidity High W2", liquidityHighColor, 1, line.style_solid)
+
+f_draw_level(levelLines, levelLabels, 7, showDaily, x1, x2, dMajorHigh,
+     "Major Buyside High Day", majorDayColor, 2, line.style_solid)
+
+f_draw_level(levelLines, levelLabels, 8, showDaily, x1, x2, dMajorLow,
+     "Major Sell-side Low Day", majorDayColor, 2, line.style_solid)
+
+f_draw_level(levelLines, levelLabels, 9, showDaily and showMinorBuyside, x1, x2, dMinorBuy,
+     "Minor Buyside Liquidity (D)", majorLiquidityColor, 2, line.style_solid)
+
+f_draw_level(levelLines, levelLabels, 10, showDaily and showDailyBOS, x1, x2, dBullBos,
+     "BOS (Daily bullish proxy)", bosColor, 2, line.style_solid)
+
+f_draw_level(levelLines, levelLabels, 11, showDaily and showEqualLows, x1, x2, dEqLow,
+     "Equal Lows - Institutional Level", color.white, 2, line.style_solid)
+
+//==============================================================================
+// DRT boxes
+//==============================================================================
+
+int weeklyDrtX2 = bar_index + weeklyBoxOffset
+int weeklyDrtX1 = weeklyDrtX2 - weeklyBoxWidth
+f_draw_drt(weeklyDrtBoxes, weeklyDrtLines,
+     showWeekly and showWeeklyWickDRT,
+     weeklyDrtX1, weeklyDrtX2, wWickBase, wWickHigh,
+     "Weekly premium wick DRT")
+
+int dailyDrtX2 = bar_index + dailyBoxOffset
+int dailyDrtX1 = dailyDrtX2 - dailyBoxWidth
+f_draw_drt(dailyDrtBoxes, dailyDrtLines,
+     showDaily and showDailyDRT,
+     dailyDrtX1, dailyDrtX2, dMajorLow, dMajorHigh,
+     "Daily " + str.tostring(dailyLookback) + "-day DRT")
+
+//==============================================================================
+// Imbalance, breakaway-gap, and breaker zones
+//==============================================================================
+
+int zoneLeftLimit = time - zonePastDays * MS_DAY
+int zoneRight = time + zoneFutureDays * MS_DAY
+
+int wLeft0 = not na(wBearTime0) ? math.max(wBearTime0, zoneLeftLimit) : na
+int wLeft1 = not na(wBearTime1) ? math.max(wBearTime1, zoneLeftLimit) : na
+int wLeft2 = not na(wBearTime2) ? math.max(wBearTime2, zoneLeftLimit) : na
+
+int dLeftBear0 = not na(dBearTime0) ? math.max(dBearTime0, zoneLeftLimit) : na
+int dLeftBear1 = not na(dBearTime1) ? math.max(dBearTime1, zoneLeftLimit) : na
+int dLeftBull0 = not na(dBullTime0) ? math.max(dBullTime0, zoneLeftLimit) : na
+
+int h4LeftBear0 = not na(h4BearTime0) ? math.max(h4BearTime0, zoneLeftLimit) : na
+int h4LeftBear1 = not na(h4BearTime1) ? math.max(h4BearTime1, zoneLeftLimit) : na
+int h4LeftBull0 = not na(h4BullTime0) ? math.max(h4BullTime0, zoneLeftLimit) : na
+
+int dBreakLeft = not na(dBreakTime) ? math.max(dBreakTime, zoneLeftLimit) : na
+int dBelowLeft = not na(dBelowTime) ? math.max(dBelowTime, zoneLeftLimit) : na
+int h4BearBreakerLeft = not na(h4BearBreakerTime) ? math.max(h4BearBreakerTime, zoneLeftLimit) : na
+int h4BullBreakerLeft = not na(h4BullBreakerTime) ? math.max(h4BullBreakerTime, zoneLeftLimit) : na
+
+f_draw_time_zone(zoneBoxes, zoneMids, 0, showWeekly and showWeeklyFVG,
+     wLeft0, zoneRight, wBearTop0, wBearBottom0,
+     "Sell-side inefficiency (W1)", color.white, color.new(color.white, 100))
+
+f_draw_time_zone(zoneBoxes, zoneMids, 1, showWeekly and showWeeklyFVG,
+     wLeft1, zoneRight, wBearTop1, wBearBottom1,
+     "Sell-side inefficiency (W2)", color.white, color.new(color.white, 100))
+
+f_draw_time_zone(zoneBoxes, zoneMids, 2, showWeekly and showWeeklyFVG,
+     wLeft2, zoneRight, wBearTop2, wBearBottom2,
+     "Sell-side inefficiency (W3)", color.white, color.new(color.white, 100))
+
+f_draw_time_zone(zoneBoxes, zoneMids, 3, showDaily and showDailyFVG,
+     dLeftBear0, zoneRight, dBearTop0, dBearBottom0,
+     "Sell-side imbalance (Day 1)", color.white, color.new(dailyImbalanceColor, 72))
+
+f_draw_time_zone(zoneBoxes, zoneMids, 4, showDaily and showDailyFVG,
+     dLeftBear1, zoneRight, dBearTop1, dBearBottom1,
+     "Sell-side imbalance (Day 2)", color.white, color.new(dailyImbalanceColor, 78))
+
+f_draw_time_zone(zoneBoxes, zoneMids, 5, showDaily and showDailyFVG,
+     dLeftBull0, zoneRight, dBullTop0, dBullBottom0,
+     "Buy-side imbalance (Day)", color.white, color.new(color.teal, 78))
+
+f_draw_time_zone(zoneBoxes, zoneMids, 6, showH4 and showH4FVG,
+     h4LeftBear0, zoneRight, h4BearTop0, h4BearBottom0,
+     "Sell-side imbalance (4H 1)", color.white, color.new(h4ImbalanceColor, 74))
+
+f_draw_time_zone(zoneBoxes, zoneMids, 7, showH4 and showH4FVG,
+     h4LeftBear1, zoneRight, h4BearTop1, h4BearBottom1,
+     "Sell-side imbalance (4H 2)", color.white, color.new(h4ImbalanceColor, 80))
+
+f_draw_time_zone(zoneBoxes, zoneMids, 8, showH4 and showH4FVG,
+     h4LeftBull0, zoneRight, h4BullTop0, h4BullBottom0,
+     "Buy-side imbalance (4H)", color.white, color.new(color.aqua, 82))
+
+f_draw_time_zone(zoneBoxes, zoneMids, 9, showDaily and showBreakawayGap,
+     dBreakLeft, zoneRight, dBreakTop, dBreakBottom,
+     "Breakaway GAP (Daily proxy)", color.new(breakawayColor, 0),
+     color.new(breakawayColor, 70))
+
+f_draw_time_zone(zoneBoxes, zoneMids, 10, showDaily and showBelowEQLGap,
+     dBelowLeft, zoneRight, dBelowTop, dBelowBottom,
+     "Imbalance below Equal Lows", color.white,
+     color.new(dailyImbalanceColor, 75))
+
+f_draw_time_zone(zoneBoxes, zoneMids, 11, showH4 and showBearBreaker,
+     h4BearBreakerLeft, zoneRight, h4BearBreakerTop, h4BearBreakerBottom,
+     "4H High-Probability Bearish Breaker (proxy)", color.white,
+     color.new(color.white, 88))
+
+f_draw_time_zone(zoneBoxes, zoneMids, 12, showH4 and showBullBreaker,
+     h4BullBreakerLeft, zoneRight, h4BullBreakerTop, h4BullBreakerBottom,
+     "4H High-Probability Bullish Breaker (proxy)", color.white,
+     color.new(color.white, 88))
+
+//==============================================================================
+// Daily 20-trading-day lookback line
+//==============================================================================
+
+float verticalTop = not na(wMajorHigh) ? wMajorHigh : dMajorHigh
+float verticalBottom = not na(wMajorLow) ? wMajorLow : dMajorLow
+
+f_draw_time_line(timeLines, 0, showDaily and showDailyLookback,
+     dLookbackTime, verticalBottom, dLookbackTime, verticalTop,
+     color.blue, 2, line.style_solid)
+
+//==============================================================================
+// Sunday-Monday 1H range and six-deviation projections
+//==============================================================================
+
+float orRange = orHigh - orLow
+bool validOr = showH1Projection and not na(orStartTime) and not na(orHigh) and
+     not na(orLow) and orRange > 0
+int projectionRightTime = not na(orStartTime) ? orStartTime + projectionHours * MS_HOUR : na
+
+bool drawAbove = projectionSide == "Above only" or projectionSide == "Both"
+bool drawBelow = projectionSide == "Below only" or projectionSide == "Both"
+
+float projectedTop = validOr ? orLow + orRange * projectionCount : na
+float projectedBottom = validOr and drawBelow ? orLow - orRange * projectionCount : orLow
+
+f_draw_time_line(timeLines, 1, validOr,
+     orStartTime, projectedBottom, orStartTime, projectedTop,
+     color.green, 2, line.style_solid)
+
+f_draw_time_line(timeLines, 2, validOr and not na(orEndTime),
+     orEndTime, projectedBottom, orEndTime, projectedTop,
+     color.green, 2, line.style_solid)
+
+f_draw_time_line(timeLines, 3, validOr,
+     orStartTime, orHigh, projectionRightTime, orHigh,
+     color.white, 2, line.style_solid)
+
+f_draw_time_line(timeLines, 4, validOr,
+     orStartTime, orLow, projectionRightTime, orLow,
+     color.white, 2, line.style_solid)
+
+f_draw_time_line(timeLines, 5, validOr and showOpeningRangeMid,
+     orStartTime, (orHigh + orLow) * 0.5,
+     projectionRightTime, (orHigh + orLow) * 0.5,
+     color.white, 1, line.style_dashed)
+
+f_draw_projection(aboveProjectionBoxes, aboveProjectionMids,
+     validOr and drawAbove, true, projectionCount,
+     orStartTime, projectionRightTime, orLow, orRange)
+
+f_draw_projection(belowProjectionBoxes, belowProjectionMids,
+     validOr and drawBelow, false, projectionCount,
+     orStartTime, projectionRightTime, orLow, orRange)
+
+//==============================================================================
+// Dashboard
+//==============================================================================
+
+float dMid = dMajorLow + (dMajorHigh - dMajorLow) * 0.5
+string dailyGrade = f_grade(close, dMajorLow, dMajorHigh)
+string weeklyGrade = f_grade(close, wMajorLow, wMajorHigh)
+string biasProxy = close > dMid and not na(dBullBos) ? "Buyside control proxy" :
+     close < dMid and not na(wBearBos) ? "Sell-side control proxy" :
+     "Mixed / unconfirmed"
+
+var table dash = table.new(position.top_right, 2, dashboardRows,
+     bgcolor=color.new(color.black, 18), frame_color=color.new(color.white, 65),
+     frame_width=1, border_color=color.new(color.white, 80), border_width=1)
+
+if barstate.islast
+    if showDashboard
+        table.cell(dash, 0, 0, "SNAP HTF_LTF", text_color=color.white,
+             bgcolor=color.new(color.blue, 55))
+        table.cell(dash, 1, 0, syminfo.ticker, text_color=color.white,
+             bgcolor=color.new(color.blue, 55))
+
+        table.cell(dash, 0, 1, "Weekly range")
+        table.cell(dash, 1, 1, weeklyGrade)
+
+        table.cell(dash, 0, 2, "Daily DRT")
+        table.cell(dash, 1, 2, dailyGrade)
+
+        table.cell(dash, 0, 3, "Structure proxy")
+        table.cell(dash, 1, 3, biasProxy,
+             text_color=biasProxy == "Buyside control proxy" ? color.lime :
+             biasProxy == "Sell-side control proxy" ? color.red : color.silver)
+
+        table.cell(dash, 0, 4, "20D lookback")
+        table.cell(dash, 1, 4, showDailyLookback ? "ON" : "OFF",
+             text_color=showDailyLookback ? color.lime : color.gray)
+
+        table.cell(dash, 0, 5, "Sunday-Monday OR")
+        table.cell(dash, 1, 5, validOr ? "Mapped" : "Waiting",
+             text_color=validOr ? color.lime : color.orange)
+
+        table.cell(dash, 0, 6, "HTF bars")
+        table.cell(dash, 1, 6, "Develop until close", text_color=color.orange)
+    else
+        table.clear(dash, 0, 0, 1, dashboardRows - 1)
+
+//==============================================================================
+// Alerts
+//==============================================================================
+
+alertcondition(ta.crossover(close, dMid), "SNAP: Daily 0.5 crossed upward",
+     "Price crossed above the daily dealing-range 0.5 DRT level.")
+
+alertcondition(ta.crossunder(close, dMid), "SNAP: Daily 0.5 crossed downward",
+     "Price crossed below the daily dealing-range 0.5 DRT level.")
+
+alertcondition(ta.crossover(close, dMajorHigh), "SNAP: Daily major high raided",
+     "Price crossed above the current daily major buyside high.")
+
+alertcondition(ta.crossunder(close, dMajorLow), "SNAP: Daily major low raided",
+     "Price crossed below the current daily major sell-side low.")
+
+alertcondition(ta.crossover(close, wMajorHigh), "SNAP: Weekly major high raided",
+     "Price crossed above the weekly major buyside liquidity pool.")
+
+alertcondition(ta.crossunder(close, wMajorLow), "SNAP: Weekly major low raided",
+     "Price crossed below the weekly major sell-side liquidity pool.")
