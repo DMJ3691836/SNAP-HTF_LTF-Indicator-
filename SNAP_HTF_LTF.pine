@@ -300,8 +300,11 @@ if bear_fvg
 //  B R E A K A W A Y   G A P S
 // ============================================================
 // A breakaway gap is present when the opening price leaves a
-// clear void above the prior high (up gap) or below the prior
-// low (down gap) by at least i_bagatr × ATR(14).
+// clear price void above the prior bar's high (up gap) or
+// below the prior bar's low (down gap) by at least i_bagatr × ATR(14).
+// high[1]/low[1] (wick extremes) are used deliberately so that only
+// a true untouched price void — with no overlap between the bars —
+// qualifies as a breakaway gap.
 bg_up = i_bag and (open - high[1]) >= i_bagatr * atr14
 bg_dn = i_bag and (low[1] - open)  >= i_bagatr * atr14
 
@@ -454,7 +457,7 @@ else
 dev_unit = nz(atr14) * i_devmul
 
 // Redraw trigger: new week/day boundary, or SMOR just finalised
-smor_just_done = smor_bld[1] and not smor_bld   // transitions false on finalisation bar
+smor_just_done = smor_bld[1] and not smor_bld   // true on the bar after SMOR finalisation
 
 should_redraw_dev = i_dev and not na(dev_h) and not na(dev_l) and
      ((i_devsrc == "SMOR"   and smor_just_done) or
@@ -482,8 +485,8 @@ if should_redraw_dev and dev_unit > 0
     array.clear(dev_lb_dn)
 
     for i = 1 to i_devn
-        // Transparency increases with each level (closer levels are more opaque)
-        transp  = math.min(90, int(float(i) / float(i_devn) * 70.0))
+        // Level 1 is fully opaque; transparency scales linearly to 80 % at level i_devn.
+        transp  = i_devn > 1 ? int(float(i - 1) / float(i_devn - 1) * 80.0) : 0
         col     = color.new(c_dev, transp)
         up_lvl  = dev_h + dev_unit * i
         dn_lvl  = dev_l - dev_unit * i

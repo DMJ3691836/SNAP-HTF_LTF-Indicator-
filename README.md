@@ -1,6 +1,6 @@
 # SNAP HTF/LTF Indicator
 
-SNAP HTF/LTF is a multi-timeframe TradingView Pine Script v5 indicator that maps market structure and liquidity from the weekly chart down to lower timeframes such as 5 minutes.  It is designed to help traders build a top-down bias, locate where price sits within higher-timeframe dealing ranges, and identify key reaction zones and liquidity targets.
+SNAP HTF/LTF is a multi-timeframe TradingView Pine Script v5 indicator that maps market structure and liquidity from the weekly chart down to lower timeframes such as 5 minutes. It is designed to help traders build a top-down bias, locate where price sits within higher-timeframe dealing ranges, and identify key reaction zones and liquidity targets.
 
 ---
 
