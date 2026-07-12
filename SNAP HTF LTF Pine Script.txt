@@ -110,24 +110,26 @@ int MIN_PROJECTION_HOURS = 12
 int MAX_PROJECTION_HOURS = 720
 int MAX_ZONE_PAST_DAYS = 1500
 int MAX_ZONE_FUTURE_DAYS = 365
+int DRT_BAND_COUNT = 4
+int DRT_LEVEL_COUNT = 5
 
 //==============================================================================
 // Analytical functions, evaluated inside request.security()
 //==============================================================================
 
-f_safe_lookback(_lookback) =>
+int f_safe_lookback(_lookback) =>
     int availableBars = bar_index + 1
     math.max(1, math.min(_lookback, availableBars))
 
-f_safe_hist_index(_barsBack) =>
+int f_safe_hist_index(_barsBack) =>
     not na(_barsBack) and _barsBack >= 0 and _barsBack <= bar_index ? _barsBack : na
 
-f_safe_time_shift(_baseTime, _deltaMs) =>
+int f_safe_time_shift(_baseTime, _deltaMs) =>
     float maxShiftMs = float(MAX_SAFE_TIME_OFFSET_DAYS) * float(MS_DAY)
     float safeDeltaMs = math.max(-maxShiftMs, math.min(float(_deltaMs), maxShiftMs))
     not na(_baseTime) ? int(math.round(float(_baseTime) + safeDeltaMs)) : na
 
-f_in_bounds(_size, _idx) =>
+bool f_in_bounds(_size, _idx) =>
     _idx >= 0 and _idx < _size
 
 f_week_pack(_lookback) =>
@@ -247,7 +249,7 @@ f_minor_buyside(_lookback, _left, _right) =>
 
 f_daily_pack(_lookback) =>
     int safeLookback = f_safe_lookback(_lookback)
-    int safeBarsBack = f_safe_hist_index(_lookback)
+    int safeBarsBack = f_safe_hist_index(math.max(_lookback, 0))
     float hi = ta.highest(high, safeLookback)
     float lo = ta.lowest(low, safeLookback)
     int lookbackTime = not na(safeBarsBack) ? time[safeBarsBack] : na
@@ -396,7 +398,7 @@ f_sunday_monday_range(_timezone) =>
         rangeHigh := math.max(rangeHigh, high)
         rangeLow := math.min(rangeLow, low)
 
-    int activeEnd = not na(time_close) ? time_close : f_safe_time_shift(time, MS_HOUR)
+    int activeEnd = not na(time_close) ? time_close : f_safe_time_shift(time, float(MS_HOUR))
     int effectiveEnd = active ? activeEnd : endTime
     [rangeHigh, rangeLow, startTime, effectiveEnd]
 
@@ -447,7 +449,7 @@ f_draw_drt(array<box> _boxes, array<line> _lines, bool _show,
     bool valid = _show and not na(_low) and not na(_high) and _high > _low
     float drtRange = _high - _low
 
-    int boxCount = math.min(4, array.size(_boxes))
+    int boxCount = math.min(DRT_BAND_COUNT, array.size(_boxes))
     if boxCount > 0
         for i = 0 to boxCount - 1
             box bx = array.get(_boxes, i)
@@ -482,7 +484,7 @@ f_draw_drt(array<box> _boxes, array<line> _lines, bool _show,
                     box.delete(bx)
                     array.set(_boxes, i, na)
 
-    int lineCount = math.min(5, array.size(_lines))
+    int lineCount = math.min(DRT_LEVEL_COUNT, array.size(_lines))
     if lineCount > 0
         for i = 0 to lineCount - 1
             line ln = array.get(_lines, i)
@@ -575,7 +577,7 @@ f_draw_time_line(array<line> _lines, int _idx, bool _show,
 f_draw_projection(array<box> _boxes, array<line> _mids, bool _show,
      bool _above, int _count, int _leftTime, int _rightTime,
      float _rangeLow, float _rangeSize) =>
-    int slotCount = math.min(math.min(MAX_PROJECTION_COUNT, array.size(_boxes)), array.size(_mids))
+    int slotCount = math.min(MAX_PROJECTION_COUNT, math.min(array.size(_boxes), array.size(_mids)))
     int safeCount = math.max(0, math.min(_count, slotCount))
     if slotCount > 0
         for i = 0 to slotCount - 1
