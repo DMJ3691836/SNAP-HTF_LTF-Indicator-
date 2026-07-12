@@ -101,18 +101,45 @@ int dashboardRows = 7
 
 int MS_HOUR = 60 * 60 * 1000
 int MS_DAY  = 24 * MS_HOUR
+int MAX_SAFE_TIME_OFFSET_DAYS = 3650
+int MAX_SWING_BARS = 20
+int MAX_WEEKLY_LOOKBACK = 520
+int MAX_DAILY_LOOKBACK = 100
+int MAX_PROJECTION_COUNT = 6
+int MIN_PROJECTION_HOURS = 12
+int MAX_PROJECTION_HOURS = 720
+int MAX_ZONE_PAST_DAYS = 1500
+int MAX_ZONE_FUTURE_DAYS = 365
+int DRT_BAND_COUNT = 4
+int DRT_LEVEL_COUNT = 5
 
 //==============================================================================
 // Analytical functions, evaluated inside request.security()
 //==============================================================================
 
+int f_safe_lookback(_lookback) =>
+    int availableBars = bar_index + 1
+    math.max(1, math.min(_lookback, availableBars))
+
+int f_safe_hist_index(_barsBack) =>
+    not na(_barsBack) and _barsBack >= 0 and _barsBack <= bar_index ? _barsBack : na
+
+int f_safe_time_shift(_baseTime, _deltaMs) =>
+    float maxShiftMs = float(MAX_SAFE_TIME_OFFSET_DAYS) * float(MS_DAY)
+    float safeDeltaMs = math.max(-maxShiftMs, math.min(float(_deltaMs), maxShiftMs))
+    not na(_baseTime) ? int(math.round(float(_baseTime) + safeDeltaMs)) : na
+
+bool f_in_bounds(_size, _idx) =>
+    _idx >= 0 and _idx < _size
+
 f_week_pack(_lookback) =>
+    int safeLookback = f_safe_lookback(_lookback)
     // ta.highestbars() returns a negative bar offset, while the history
     // operator [] requires a non-negative number of bars back.
-    int highestOffset = ta.highestbars(high, _lookback)
-    int barsBack = not na(highestOffset) ? math.abs(highestOffset) : na
-    float majorHi = ta.highest(high, _lookback)
-    float majorLo = ta.lowest(low, _lookback)
+    int highestOffset = ta.highestbars(high, safeLookback)
+    int barsBack = f_safe_hist_index(not na(highestOffset) ? math.abs(highestOffset) : na)
+    float majorHi = ta.highest(high, safeLookback)
+    float majorLo = ta.lowest(low, safeLookback)
     float wickHi = not na(barsBack) ? high[barsBack] : na
     float wickBase = not na(barsBack) ? math.max(open[barsBack], close[barsBack]) : na
     [majorHi, majorLo, wickHi, wickBase]
@@ -214,23 +241,28 @@ f_bull_bos(_left, _right) =>
     bos
 
 f_minor_buyside(_lookback, _left, _right) =>
-    float majorHi = ta.highest(high, _lookback)
+    int safeLookback = f_safe_lookback(_lookback)
+    float majorHi = ta.highest(high, safeLookback)
     float ph = ta.pivothigh(high, _left, _right)
     bool nested = not na(ph) and ph < majorHi
     ta.valuewhen(nested, ph, 0)
 
 f_daily_pack(_lookback) =>
-    float hi = ta.highest(high, _lookback)
-    float lo = ta.lowest(low, _lookback)
-    int lookbackTime = time[_lookback]
+    int safeLookback = f_safe_lookback(_lookback)
+    int safeBarsBack = f_safe_hist_index(math.max(_lookback, 0))
+    float hi = ta.highest(high, safeLookback)
+    float lo = ta.lowest(low, safeLookback)
+    int lookbackTime = not na(safeBarsBack) ? time[safeBarsBack] : na
     [hi, lo, lookbackTime]
 
 f_breakaway_gap(_lookback) =>
-    float priorHi = ta.highest(high[1], _lookback)
-    float priorLo = ta.lowest(low[1], _lookback)
-    float mid = priorLo + (priorHi - priorLo) * 0.5
+    int safeLookback = f_safe_lookback(_lookback)
+    bool hasPriorWindow = bar_index >= safeLookback
+    float priorHi = hasPriorWindow ? ta.highest(high[1], safeLookback) : na
+    float priorLo = hasPriorWindow ? ta.lowest(low[1], safeLookback) : na
+    float mid = not na(priorHi) and not na(priorLo) ? priorLo + (priorHi - priorLo) * 0.5 : na
     bool bullGap = low > high[2]
-    bool displaced = bullGap and close > mid and close[1] <= mid
+    bool displaced = not na(mid) and bullGap and close > mid and close[1] <= mid
     float top = ta.valuewhen(displaced, low, 0)
     float bottom = ta.valuewhen(displaced, high[2], 0)
     int started = ta.valuewhen(displaced, time, 0)
@@ -366,7 +398,8 @@ f_sunday_monday_range(_timezone) =>
         rangeHigh := math.max(rangeHigh, high)
         rangeLow := math.min(rangeLow, low)
 
-    int effectiveEnd = active ? time_close : endTime
+    int activeEnd = not na(time_close) ? time_close : f_safe_time_shift(time, float(MS_HOUR))
+    int effectiveEnd = active ? activeEnd : endTime
     [rangeHigh, rangeLow, startTime, effectiveEnd]
 
 //==============================================================================
@@ -375,9 +408,10 @@ f_sunday_monday_range(_timezone) =>
 
 f_draw_level(array<line> _lines, array<label> _labels, int _idx, bool _show,
      int _x1, int _x2, float _y, string _text, color _color, int _width, _style) =>
-    line ln = array.get(_lines, _idx)
-    label lb = array.get(_labels, _idx)
-    bool valid = _show and not na(_y)
+    bool slotValid = f_in_bounds(array.size(_lines), _idx) and f_in_bounds(array.size(_labels), _idx)
+    line ln = slotValid ? array.get(_lines, _idx) : na
+    label lb = slotValid ? array.get(_labels, _idx) : na
+    bool valid = slotValid and _show and not na(_y)
 
     if valid
         if na(ln)
@@ -415,67 +449,72 @@ f_draw_drt(array<box> _boxes, array<line> _lines, bool _show,
     bool valid = _show and not na(_low) and not na(_high) and _high > _low
     float drtRange = _high - _low
 
-    for i = 0 to 3
-        box bx = array.get(_boxes, i)
-        if valid
-            float bottom = _low + drtRange * (i * 0.25)
-            float top = _low + drtRange * ((i + 1) * 0.25)
-            color bandFill = i == 0 ? color.new(color.yellow, 90) :
-                 i == 1 ? color.new(color.green, 90) :
-                 i == 2 ? color.new(color.blue, 90) :
-                 color.new(color.gray, 92)
-            string bandText = i == 3 ? _title + "\n0.75-1.00" :
-                 i == 2 ? "0.50-0.75" :
-                 i == 1 ? "0.25-0.50" : "0.00-0.25"
+    int boxCount = math.min(DRT_BAND_COUNT, array.size(_boxes))
+    if boxCount > 0
+        for i = 0 to boxCount - 1
+            box bx = array.get(_boxes, i)
+            if valid
+                float bottom = _low + drtRange * (i * 0.25)
+                float top = _low + drtRange * ((i + 1) * 0.25)
+                color bandFill = i == 0 ? color.new(color.yellow, 90) :
+                     i == 1 ? color.new(color.green, 90) :
+                     i == 2 ? color.new(color.blue, 90) :
+                     color.new(color.gray, 92)
+                string bandText = i == 3 ? _title + "\n0.75-1.00" :
+                     i == 2 ? "0.50-0.75" :
+                     i == 1 ? "0.25-0.50" : "0.00-0.25"
 
-            if na(bx)
-                bx := box.new(left=_x1, top=top, right=_x2, bottom=bottom,
-                     xloc=xloc.bar_index, border_color=color.new(color.white, 35),
-                     bgcolor=bandFill, text=bandText, text_color=color.new(color.white, 15),
-                     text_size=size.tiny)
-                array.set(_boxes, i, bx)
+                if na(bx)
+                    bx := box.new(left=_x1, top=top, right=_x2, bottom=bottom,
+                         xloc=xloc.bar_index, border_color=color.new(color.white, 35),
+                         bgcolor=bandFill, text=bandText, text_color=color.new(color.white, 15),
+                         text_size=size.tiny)
+                    array.set(_boxes, i, bx)
+                else
+                    box.set_left(bx, _x1)
+                    box.set_right(bx, _x2)
+                    box.set_top(bx, top)
+                    box.set_bottom(bx, bottom)
+                    box.set_border_color(bx, color.new(color.white, 35))
+                    box.set_bgcolor(bx, bandFill)
+                    box.set_text(bx, bandText)
+                    box.set_text_color(bx, color.new(color.white, 15))
             else
-                box.set_left(bx, _x1)
-                box.set_right(bx, _x2)
-                box.set_top(bx, top)
-                box.set_bottom(bx, bottom)
-                box.set_border_color(bx, color.new(color.white, 35))
-                box.set_bgcolor(bx, bandFill)
-                box.set_text(bx, bandText)
-                box.set_text_color(bx, color.new(color.white, 15))
-        else
-            if not na(bx)
-                box.delete(bx)
-                array.set(_boxes, i, na)
+                if not na(bx)
+                    box.delete(bx)
+                    array.set(_boxes, i, na)
 
-    for i = 0 to 4
-        line ln = array.get(_lines, i)
-        if valid
-            float y = _low + drtRange * (i * 0.25)
-            color clr = i == 1 ? color.yellow :
-                 i == 2 ? color.green :
-                 i == 3 ? color.blue : color.white
-            if na(ln)
-                ln := line.new(x1=_x1, y1=y, x2=_x2, y2=y, xloc=xloc.bar_index,
-                     color=clr, width=i == 0 or i == 4 ? 2 : 1)
-                array.set(_lines, i, ln)
+    int lineCount = math.min(DRT_LEVEL_COUNT, array.size(_lines))
+    if lineCount > 0
+        for i = 0 to lineCount - 1
+            line ln = array.get(_lines, i)
+            if valid
+                float y = _low + drtRange * (i * 0.25)
+                color clr = i == 1 ? color.yellow :
+                     i == 2 ? color.green :
+                     i == 3 ? color.blue : color.white
+                if na(ln)
+                    ln := line.new(x1=_x1, y1=y, x2=_x2, y2=y, xloc=xloc.bar_index,
+                         color=clr, width=i == 0 or i == 4 ? 2 : 1)
+                    array.set(_lines, i, ln)
+                else
+                    line.set_xy1(ln, _x1, y)
+                    line.set_xy2(ln, _x2, y)
+                    line.set_color(ln, clr)
+                    line.set_width(ln, i == 0 or i == 4 ? 2 : 1)
             else
-                line.set_xy1(ln, _x1, y)
-                line.set_xy2(ln, _x2, y)
-                line.set_color(ln, clr)
-                line.set_width(ln, i == 0 or i == 4 ? 2 : 1)
-        else
-            if not na(ln)
-                line.delete(ln)
-                array.set(_lines, i, na)
+                if not na(ln)
+                    line.delete(ln)
+                    array.set(_lines, i, na)
 
 f_draw_time_zone(array<box> _boxes, array<line> _mids, int _idx, bool _show,
      int _leftTime, int _rightTime, float _top, float _bottom, string _text,
      color _border, color _fill) =>
-    box bx = array.get(_boxes, _idx)
-    line mid = array.get(_mids, _idx)
-    bool valid = _show and not na(_leftTime) and not na(_rightTime) and
-         not na(_top) and not na(_bottom) and _top > _bottom
+    bool slotValid = f_in_bounds(array.size(_boxes), _idx) and f_in_bounds(array.size(_mids), _idx)
+    box bx = slotValid ? array.get(_boxes, _idx) : na
+    line mid = slotValid ? array.get(_mids, _idx) : na
+    bool valid = slotValid and _show and not na(_leftTime) and not na(_rightTime) and
+         _rightTime >= _leftTime and not na(_top) and not na(_bottom) and _top > _bottom
 
     if valid
         float middle = (_top + _bottom) * 0.5
@@ -514,8 +553,10 @@ f_draw_time_zone(array<box> _boxes, array<line> _mids, int _idx, bool _show,
 
 f_draw_time_line(array<line> _lines, int _idx, bool _show,
      int _x1, float _y1, int _x2, float _y2, color _color, int _width, _style) =>
-    line ln = array.get(_lines, _idx)
-    bool valid = _show and not na(_x1) and not na(_x2) and not na(_y1) and not na(_y2)
+    bool slotValid = f_in_bounds(array.size(_lines), _idx)
+    line ln = slotValid ? array.get(_lines, _idx) : na
+    bool valid = slotValid and _show and not na(_x1) and not na(_x2) and _x2 >= _x1 and
+         not na(_y1) and not na(_y2)
 
     if valid
         if na(ln)
@@ -536,54 +577,57 @@ f_draw_time_line(array<line> _lines, int _idx, bool _show,
 f_draw_projection(array<box> _boxes, array<line> _mids, bool _show,
      bool _above, int _count, int _leftTime, int _rightTime,
      float _rangeLow, float _rangeSize) =>
-    for i = 0 to 5
-        box bx = array.get(_boxes, i)
-        line mid = array.get(_mids, i)
-        bool activeZone = _show and i < _count and not na(_leftTime) and
-             not na(_rightTime) and not na(_rangeLow) and _rangeSize > 0
+    int slotCount = math.min(MAX_PROJECTION_COUNT, math.min(array.size(_boxes), array.size(_mids)))
+    int safeCount = math.max(0, math.min(_count, slotCount))
+    if slotCount > 0
+        for i = 0 to slotCount - 1
+            box bx = array.get(_boxes, i)
+            line mid = array.get(_mids, i)
+            bool activeZone = _show and i < safeCount and not na(_leftTime) and
+                 not na(_rightTime) and _rightTime >= _leftTime and not na(_rangeLow) and _rangeSize > 0
 
-        if activeZone
-            float bottom = _above ?
-                 _rangeLow + _rangeSize * i :
-                 _rangeLow - _rangeSize * (i + 1)
-            float top = _above ?
-                 _rangeLow + _rangeSize * (i + 1) :
-                 _rangeLow - _rangeSize * i
-            float middle = (top + bottom) * 0.5
-            string zoneLabel = (_above ? "Zone " : "Sell Zone ") + str.tostring(i + 1)
+            if activeZone
+                float bottom = _above ?
+                     _rangeLow + _rangeSize * i :
+                     _rangeLow - _rangeSize * (i + 1)
+                float top = _above ?
+                     _rangeLow + _rangeSize * (i + 1) :
+                     _rangeLow - _rangeSize * i
+                float middle = (top + bottom) * 0.5
+                string zoneLabel = (_above ? "Zone " : "Sell Zone ") + str.tostring(i + 1)
 
-            if na(bx)
-                bx := box.new(left=_leftTime, top=top, right=_rightTime, bottom=bottom,
-                     xloc=xloc.bar_time, border_color=color.new(color.white, 25),
-                     bgcolor=color.new(color.white, 93), text=zoneLabel,
-                     text_color=color.new(color.white, 5), text_size=size.tiny)
-                array.set(_boxes, i, bx)
+                if na(bx)
+                    bx := box.new(left=_leftTime, top=top, right=_rightTime, bottom=bottom,
+                         xloc=xloc.bar_time, border_color=color.new(color.white, 25),
+                         bgcolor=color.new(color.white, 93), text=zoneLabel,
+                         text_color=color.new(color.white, 5), text_size=size.tiny)
+                    array.set(_boxes, i, bx)
+                else
+                    box.set_left(bx, _leftTime)
+                    box.set_right(bx, _rightTime)
+                    box.set_top(bx, top)
+                    box.set_bottom(bx, bottom)
+                    box.set_text(bx, zoneLabel)
+                    box.set_border_color(bx, color.new(color.white, 25))
+                    box.set_bgcolor(bx, color.new(color.white, 93))
+
+                if na(mid)
+                    mid := line.new(x1=_leftTime, y1=middle, x2=_rightTime, y2=middle,
+                         xloc=xloc.bar_time, color=color.new(color.white, 15),
+                         style=line.style_dashed)
+                    array.set(_mids, i, mid)
+                else
+                    line.set_xy1(mid, _leftTime, middle)
+                    line.set_xy2(mid, _rightTime, middle)
+                    line.set_color(mid, color.new(color.white, 15))
+                    line.set_style(mid, line.style_dashed)
             else
-                box.set_left(bx, _leftTime)
-                box.set_right(bx, _rightTime)
-                box.set_top(bx, top)
-                box.set_bottom(bx, bottom)
-                box.set_text(bx, zoneLabel)
-                box.set_border_color(bx, color.new(color.white, 25))
-                box.set_bgcolor(bx, color.new(color.white, 93))
-
-            if na(mid)
-                mid := line.new(x1=_leftTime, y1=middle, x2=_rightTime, y2=middle,
-                     xloc=xloc.bar_time, color=color.new(color.white, 15),
-                     style=line.style_dashed)
-                array.set(_mids, i, mid)
-            else
-                line.set_xy1(mid, _leftTime, middle)
-                line.set_xy2(mid, _rightTime, middle)
-                line.set_color(mid, color.new(color.white, 15))
-                line.set_style(mid, line.style_dashed)
-        else
-            if not na(bx)
-                box.delete(bx)
-                array.set(_boxes, i, na)
-            if not na(mid)
-                line.delete(mid)
-                array.set(_mids, i, na)
+                if not na(bx)
+                    box.delete(bx)
+                    array.set(_boxes, i, na)
+                if not na(mid)
+                    line.delete(mid)
+                    array.set(_mids, i, na)
 
 f_grade(_price, _low, _high) =>
     string result = "n/a"
@@ -600,28 +644,38 @@ f_grade(_price, _low, _high) =>
 // Higher-timeframe data
 //==============================================================================
 
+int safeSwingLeft = math.max(1, math.min(swingLeft, MAX_SWING_BARS))
+int safeSwingRight = math.max(1, math.min(swingRight, MAX_SWING_BARS))
+float safeEqAtrTol = math.max(0.0, eqAtrTol)
+int safeWeeklyLookback = math.max(1, math.min(weeklyLookback, MAX_WEEKLY_LOOKBACK))
+int safeDailyLookback = math.max(1, math.min(dailyLookback, MAX_DAILY_LOOKBACK))
+int safeProjectionCount = math.max(1, math.min(projectionCount, MAX_PROJECTION_COUNT))
+int safeProjectionHours = math.max(MIN_PROJECTION_HOURS, math.min(projectionHours, MAX_PROJECTION_HOURS))
+int safeZonePastDays = math.max(0, math.min(zonePastDays, MAX_ZONE_PAST_DAYS))
+int safeZoneFutureDays = math.max(0, math.min(zoneFutureDays, MAX_ZONE_FUTURE_DAYS))
+
 // Weekly
-[wMajorHigh, wMajorLow, wWickHigh, wWickBase] = request.security(syminfo.tickerid, "W", f_week_pack(weeklyLookback),
+[wMajorHigh, wMajorLow, wWickHigh, wWickBase] = request.security(syminfo.tickerid, "W", f_week_pack(safeWeeklyLookback),
          gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 float wEqHigh = request.security(syminfo.tickerid, "W",
-     f_equal_high(swingLeft, swingRight, eqAtrTol),
+     f_equal_high(safeSwingLeft, safeSwingRight, safeEqAtrTol),
      gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 float wEqLow = request.security(syminfo.tickerid, "W",
-     f_equal_low(swingLeft, swingRight, eqAtrTol),
+     f_equal_low(safeSwingLeft, safeSwingRight, safeEqAtrTol),
      gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 float wBearBos = request.security(syminfo.tickerid, "W",
-     f_bear_bos(swingLeft, swingRight),
+     f_bear_bos(safeSwingLeft, safeSwingRight),
      gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 float wLiqHigh0 = request.security(syminfo.tickerid, "W",
-     f_pivot_high(swingLeft, swingRight, 0),
+     f_pivot_high(safeSwingLeft, safeSwingRight, 0),
      gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 float wLiqHigh1 = request.security(syminfo.tickerid, "W",
-     f_pivot_high(swingLeft, swingRight, 1),
+     f_pivot_high(safeSwingLeft, safeSwingRight, 1),
      gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 [wBearTop0, wBearBottom0, wBearTime0] = request.security(syminfo.tickerid, "W", f_bear_fvg(0),
@@ -632,19 +686,19 @@ float wLiqHigh1 = request.security(syminfo.tickerid, "W",
          gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 // Daily
-[dMajorHigh, dMajorLow, dLookbackTime] = request.security(syminfo.tickerid, "D", f_daily_pack(dailyLookback),
+[dMajorHigh, dMajorLow, dLookbackTime] = request.security(syminfo.tickerid, "D", f_daily_pack(safeDailyLookback),
          gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 float dBullBos = request.security(syminfo.tickerid, "D",
-     f_bull_bos(swingLeft, swingRight),
+     f_bull_bos(safeSwingLeft, safeSwingRight),
      gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 float dMinorBuy = request.security(syminfo.tickerid, "D",
-     f_minor_buyside(dailyLookback, swingLeft, swingRight),
+     f_minor_buyside(safeDailyLookback, safeSwingLeft, safeSwingRight),
      gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 float dEqLow = request.security(syminfo.tickerid, "D",
-     f_equal_low(swingLeft, swingRight, eqAtrTol),
+     f_equal_low(safeSwingLeft, safeSwingRight, safeEqAtrTol),
      gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 [dBearTop0, dBearBottom0, dBearTime0] = request.security(syminfo.tickerid, "D", f_bear_fvg(0),
@@ -654,11 +708,11 @@ float dEqLow = request.security(syminfo.tickerid, "D",
 [dBullTop0, dBullBottom0, dBullTime0] = request.security(syminfo.tickerid, "D", f_bull_fvg(0),
          gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
-[dBreakTop, dBreakBottom, dBreakTime] = request.security(syminfo.tickerid, "D", f_breakaway_gap(dailyLookback),
+[dBreakTop, dBreakBottom, dBreakTime] = request.security(syminfo.tickerid, "D", f_breakaway_gap(safeDailyLookback),
          gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 [dBelowTop, dBelowBottom, dBelowTime] = request.security(syminfo.tickerid, "D",
-         f_imbalance_below_equal_lows(swingLeft, swingRight, eqAtrTol),
+         f_imbalance_below_equal_lows(safeSwingLeft, safeSwingRight, safeEqAtrTol),
          gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 // Four hour
@@ -670,11 +724,11 @@ float dEqLow = request.security(syminfo.tickerid, "D",
          gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 [h4BearBreakerTop, h4BearBreakerBottom, h4BearBreakerTime] = request.security(syminfo.tickerid, "240",
-         f_bear_breaker(swingLeft, swingRight),
+         f_bear_breaker(safeSwingLeft, safeSwingRight),
          gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 [h4BullBreakerTop, h4BullBreakerBottom, h4BullBreakerTime] = request.security(syminfo.tickerid, "240",
-         f_bull_breaker(swingLeft, swingRight),
+         f_bull_breaker(safeSwingLeft, safeSwingRight),
          gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 // One hour Sunday-Monday range
@@ -764,14 +818,14 @@ int dailyDrtX1 = dailyDrtX2 - dailyBoxWidth
 f_draw_drt(dailyDrtBoxes, dailyDrtLines,
      showDaily and showDailyDRT,
      dailyDrtX1, dailyDrtX2, dMajorLow, dMajorHigh,
-     "Daily " + str.tostring(dailyLookback) + "-day DRT")
+     "Daily " + str.tostring(safeDailyLookback) + "-day DRT")
 
 //==============================================================================
 // Imbalance, breakaway-gap, and breaker zones
 //==============================================================================
 
-int zoneLeftLimit = time - zonePastDays * MS_DAY
-int zoneRight = time + zoneFutureDays * MS_DAY
+int zoneLeftLimit = f_safe_time_shift(time, -float(safeZonePastDays) * MS_DAY)
+int zoneRight = f_safe_time_shift(time, float(safeZoneFutureDays) * MS_DAY)
 
 int wLeft0 = not na(wBearTime0) ? math.max(wBearTime0, zoneLeftLimit) : na
 int wLeft1 = not na(wBearTime1) ? math.max(wBearTime1, zoneLeftLimit) : na
@@ -864,13 +918,13 @@ f_draw_time_line(timeLines, 0, showDaily and showDailyLookback,
 float orRange = orHigh - orLow
 bool validOr = showH1Projection and not na(orStartTime) and not na(orHigh) and
      not na(orLow) and orRange > 0
-int projectionRightTime = not na(orStartTime) ? orStartTime + projectionHours * MS_HOUR : na
+int projectionRightTime = not na(orStartTime) ? f_safe_time_shift(orStartTime, float(safeProjectionHours) * MS_HOUR) : na
 
 bool drawAbove = projectionSide == "Above only" or projectionSide == "Both"
 bool drawBelow = projectionSide == "Below only" or projectionSide == "Both"
 
-float projectedTop = validOr ? orLow + orRange * projectionCount : na
-float projectedBottom = validOr and drawBelow ? orLow - orRange * projectionCount : orLow
+float projectedTop = validOr ? orLow + orRange * safeProjectionCount : na
+float projectedBottom = validOr and drawBelow ? orLow - orRange * safeProjectionCount : orLow
 
 f_draw_time_line(timeLines, 1, validOr,
      orStartTime, projectedBottom, orStartTime, projectedTop,
@@ -894,11 +948,11 @@ f_draw_time_line(timeLines, 5, validOr and showOpeningRangeMid,
      color.white, 1, line.style_dashed)
 
 f_draw_projection(aboveProjectionBoxes, aboveProjectionMids,
-     validOr and drawAbove, true, projectionCount,
+     validOr and drawAbove, true, safeProjectionCount,
      orStartTime, projectionRightTime, orLow, orRange)
 
 f_draw_projection(belowProjectionBoxes, belowProjectionMids,
-     validOr and drawBelow, false, projectionCount,
+     validOr and drawBelow, false, safeProjectionCount,
      orStartTime, projectionRightTime, orLow, orRange)
 
 //==============================================================================
