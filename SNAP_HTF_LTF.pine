@@ -1,0 +1,504 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0
+// © DMJ3691836
+//@version=5
+indicator("SNAP HTF/LTF", shorttitle="SNAP", overlay=true,
+          max_lines_count=500, max_boxes_count=500, max_labels_count=500)
+
+// ============================================================
+//  I N P U T S
+// ============================================================
+
+// ── Weekly Liquidity ────────────────────────────────────────
+G_WK    = "Weekly Liquidity"
+i_wk    = input.bool(true,  "Show Weekly Highs / Lows",         group=G_WK)
+c_wk    = input.color(color.new(#FF6D00, 0), "Colour",          group=G_WK)
+
+// ── Daily Liquidity ─────────────────────────────────────────
+G_DY    = "Daily Liquidity"
+i_dy    = input.bool(true,  "Show Daily Highs / Lows",           group=G_DY)
+c_dy    = input.color(color.new(#2196F3, 0), "Colour",           group=G_DY)
+
+// ── Dealing Range & DRT Levels ──────────────────────────────
+G_DR    = "Dealing Range (DR / DRT)"
+i_dr    = input.bool(true,  "Show Dealing Range Box",            group=G_DR)
+i_drsrc = input.string("Weekly", "Source",
+          options=["Weekly", "Daily"],                            group=G_DR)
+i_drt   = input.bool(true,  "Show DRT Lines (75 / 50 / 25)",    group=G_DR)
+c_drbox = input.color(color.new(#9C27B0, 85), "Box Colour",     group=G_DR)
+c_prem  = input.color(color.new(#F44336,  0), "Premium",        group=G_DR)
+c_eq    = input.color(color.new(#FFEB3B,  0), "Equilibrium",    group=G_DR)
+c_disc  = input.color(color.new(#4CAF50,  0), "Discount",       group=G_DR)
+
+// ── Equal Highs & Lows ──────────────────────────────────────
+G_EQ    = "Equal Highs & Lows (EQH / EQL)"
+i_eq    = input.bool(true,  "Show EQH / EQL",                   group=G_EQ)
+i_eqlen = input.int(10,  "Pivot Length",
+          minval=3, maxval=50,                                    group=G_EQ)
+i_eqpct = input.float(0.05, "Match Threshold %",
+          minval=0.01, step=0.01,                                 group=G_EQ)
+c_eqh   = input.color(color.new(#F44336, 0), "EQH Colour",      group=G_EQ)
+c_eql   = input.color(color.new(#4CAF50, 0), "EQL Colour",      group=G_EQ)
+
+// ── Break of Structure ──────────────────────────────────────
+G_BOS   = "Break of Structure (BOS)"
+i_bos   = input.bool(true,  "Show BOS",                         group=G_BOS)
+i_boslen = input.int(5, "Swing Length",
+           minval=2, maxval=20,                                   group=G_BOS)
+c_bbos  = input.color(color.new(#4CAF50, 0), "Bullish BOS",     group=G_BOS)
+c_beos  = input.color(color.new(#F44336, 0), "Bearish BOS",     group=G_BOS)
+
+// ── Fair Value Gaps ─────────────────────────────────────────
+G_FVG   = "Fair Value Gaps (FVG)"
+i_fvg   = input.bool(true,  "Show FVGs",                        group=G_FVG)
+i_fvgext = input.int(20, "Extend (bars)",
+           minval=1, maxval=200,                                  group=G_FVG)
+c_bfvg  = input.color(color.new(#4CAF50, 75), "Bullish FVG",   group=G_FVG)
+c_befvg = input.color(color.new(#F44336, 75), "Bearish FVG",   group=G_FVG)
+
+// ── Breakaway Gaps ──────────────────────────────────────────
+G_BAG   = "Breakaway Gaps"
+i_bag   = input.bool(true,  "Show Breakaway Gaps",              group=G_BAG)
+i_bagatr = input.float(0.5, "Minimum Gap Size (ATR ×)",
+           minval=0.1, step=0.1,                                  group=G_BAG)
+c_ubag  = input.color(color.new(#00BCD4, 75), "Up Gap",        group=G_BAG)
+c_dbag  = input.color(color.new(#FF9800, 75), "Down Gap",      group=G_BAG)
+
+// ── 4H Breaker Blocks ───────────────────────────────────────
+G_BB    = "4H Breaker Blocks"
+i_bb    = input.bool(true,  "Show 4H Breaker Blocks",           group=G_BB)
+i_bbext = input.int(20, "Extend (bars)",
+          minval=1, maxval=200,                                   group=G_BB)
+c_bubb  = input.color(color.new(#4CAF50, 75), "Bullish Breaker", group=G_BB)
+c_bebb  = input.color(color.new(#F44336, 75), "Bearish Breaker", group=G_BB)
+
+// ── Sunday–Monday Opening Range ─────────────────────────────
+G_SMOR  = "Sunday–Monday Opening Range (SMOR)"
+i_smor  = input.bool(true,  "Show SMOR",                        group=G_SMOR)
+c_smor  = input.color(color.new(#607D8B, 80), "Box Colour",     group=G_SMOR)
+c_smorm = input.color(color.new(#607D8B,  0), "Mid-line Colour", group=G_SMOR)
+
+// ── Deviation Zones ─────────────────────────────────────────
+G_DEV   = "Deviation Zones"
+i_dev   = input.bool(true,  "Show Deviations",                  group=G_DEV)
+i_devsrc = input.string("SMOR", "Source",
+           options=["SMOR", "Daily", "Weekly"],                   group=G_DEV)
+i_devn  = input.int(6, "Levels (1–6)",
+          minval=1, maxval=6,                                     group=G_DEV)
+i_devmul = input.float(1.0, "ATR Multiplier per Level",
+           minval=0.1, step=0.1,                                  group=G_DEV)
+c_dev   = input.color(color.new(#9E9E9E, 0), "Colour",          group=G_DEV)
+
+// ============================================================
+//  G L O B A L S
+// ============================================================
+atr14    = ta.atr(14)
+new_week = ta.change(time("W")) != 0
+new_day  = ta.change(time("D")) != 0
+new_4h   = ta.change(time("240")) != 0
+
+// ============================================================
+//  W E E K L Y   L I Q U I D I T Y   P O O L S
+// ============================================================
+// Use high[1]/low[1] with lookahead_on to get the completed
+// prior-week high/low without repainting on every bar.
+pwh = request.security(syminfo.tickerid, "W", high[1],
+      lookahead=barmerge.lookahead_on)
+pwl = request.security(syminfo.tickerid, "W", low[1],
+      lookahead=barmerge.lookahead_on)
+
+var line  l_pwh  = na
+var line  l_pwl  = na
+var label lb_pwh = na
+var label lb_pwl = na
+
+if i_wk and new_week
+    line.delete(l_pwh)
+    line.delete(l_pwl)
+    label.delete(lb_pwh)
+    label.delete(lb_pwl)
+    l_pwh  := line.new(bar_index, pwh, bar_index + 500, pwh,
+                       color=c_wk, style=line.style_dashed, width=1)
+    l_pwl  := line.new(bar_index, pwl, bar_index + 500, pwl,
+                       color=c_wk, style=line.style_dashed, width=1)
+    lb_pwh := label.new(bar_index, pwh, "PWH",
+                        style=label.style_label_right,
+                        color=color.new(c_wk, 80), textcolor=c_wk, size=size.small)
+    lb_pwl := label.new(bar_index, pwl, "PWL",
+                        style=label.style_label_right,
+                        color=color.new(c_wk, 80), textcolor=c_wk, size=size.small)
+
+// ============================================================
+//  D A I L Y   L I Q U I D I T Y   P O O L S
+// ============================================================
+pdh = request.security(syminfo.tickerid, "D", high[1],
+      lookahead=barmerge.lookahead_on)
+pdl = request.security(syminfo.tickerid, "D", low[1],
+      lookahead=barmerge.lookahead_on)
+
+var line  l_pdh  = na
+var line  l_pdl  = na
+var label lb_pdh = na
+var label lb_pdl = na
+
+if i_dy and new_day
+    line.delete(l_pdh)
+    line.delete(l_pdl)
+    label.delete(lb_pdh)
+    label.delete(lb_pdl)
+    l_pdh  := line.new(bar_index, pdh, bar_index + 500, pdh,
+                       color=c_dy, style=line.style_dashed, width=1)
+    l_pdl  := line.new(bar_index, pdl, bar_index + 500, pdl,
+                       color=c_dy, style=line.style_dashed, width=1)
+    lb_pdh := label.new(bar_index, pdh, "PDH",
+                        style=label.style_label_right,
+                        color=color.new(c_dy, 80), textcolor=c_dy, size=size.small)
+    lb_pdl := label.new(bar_index, pdl, "PDL",
+                        style=label.style_label_right,
+                        color=color.new(c_dy, 80), textcolor=c_dy, size=size.small)
+
+// ============================================================
+//  D E A L I N G   R A N G E  +  D R T   L E V E L S
+// ============================================================
+// Grade the dealing range into Premium (top 25%), Equilibrium
+// (midpoint) and Discount (bottom 25%) zones.
+dr_h  = i_drsrc == "Weekly" ? pwh : pdh
+dr_l  = i_drsrc == "Weekly" ? pwl : pdl
+dr_r  = dr_h - dr_l
+
+dr_75 = dr_l + dr_r * 0.75   // Premium boundary   (75 %)
+dr_50 = dr_l + dr_r * 0.50   // Equilibrium        (50 %)
+dr_25 = dr_l + dr_r * 0.25   // Discount boundary  (25 %)
+
+new_dr = i_drsrc == "Weekly" ? new_week : new_day
+
+var box   bx_dr  = na
+var line  l_75   = na
+var line  l_50   = na
+var line  l_25   = na
+var label lb_75  = na
+var label lb_50  = na
+var label lb_25  = na
+
+if i_dr and new_dr
+    box.delete(bx_dr)
+    line.delete(l_75)
+    line.delete(l_50)
+    line.delete(l_25)
+    label.delete(lb_75)
+    label.delete(lb_50)
+    label.delete(lb_25)
+
+    bx_dr := box.new(bar_index, dr_h, bar_index + 500, dr_l,
+                     bgcolor=c_drbox, border_color=color.new(#9C27B0, 40),
+                     border_width=1)
+
+    if i_drt
+        l_75  := line.new(bar_index, dr_75, bar_index + 500, dr_75,
+                          color=c_prem, style=line.style_dotted, width=1)
+        l_50  := line.new(bar_index, dr_50, bar_index + 500, dr_50,
+                          color=c_eq,   style=line.style_dotted, width=2)
+        l_25  := line.new(bar_index, dr_25, bar_index + 500, dr_25,
+                          color=c_disc, style=line.style_dotted, width=1)
+        lb_75 := label.new(bar_index, dr_75, "Premium  75 %",
+                           style=label.style_label_right,
+                           color=color.new(c_prem, 80), textcolor=c_prem, size=size.tiny)
+        lb_50 := label.new(bar_index, dr_50, "Equilibrium",
+                           style=label.style_label_right,
+                           color=color.new(c_eq, 80), textcolor=c_eq, size=size.tiny)
+        lb_25 := label.new(bar_index, dr_25, "Discount  25 %",
+                           style=label.style_label_right,
+                           color=color.new(c_disc, 80), textcolor=c_disc, size=size.tiny)
+
+// ============================================================
+//  E Q U A L   H I G H S  &  L O W S
+// ============================================================
+// Two consecutive pivot highs (or lows) within i_eqpct % of each
+// other are considered equal and tagged EQH / EQL.
+ph = ta.pivothigh(high, i_eqlen, i_eqlen)
+pl = ta.pivotlow (low,  i_eqlen, i_eqlen)
+
+ph_prev = ta.valuewhen(not na(ph), ph, 1)
+pl_prev = ta.valuewhen(not na(pl), pl, 1)
+
+if i_eq and not na(ph) and not na(ph_prev)
+    if math.abs(ph - ph_prev) / ph_prev * 100 <= i_eqpct
+        label.new(bar_index[i_eqlen], ph, "EQH",
+                  style=label.style_label_down,
+                  color=color.new(c_eqh, 70), textcolor=c_eqh, size=size.small)
+        line.new(bar_index[i_eqlen * 2], ph_prev, bar_index[i_eqlen], ph,
+                 color=c_eqh, style=line.style_dashed, width=1)
+
+if i_eq and not na(pl) and not na(pl_prev)
+    if math.abs(pl - pl_prev) / pl_prev * 100 <= i_eqpct
+        label.new(bar_index[i_eqlen], pl, "EQL",
+                  style=label.style_label_up,
+                  color=color.new(c_eql, 70), textcolor=c_eql, size=size.small)
+        line.new(bar_index[i_eqlen * 2], pl_prev, bar_index[i_eqlen], pl,
+                 color=c_eql, style=line.style_dashed, width=1)
+
+// ============================================================
+//  B R E A K   O F   S T R U C T U R E
+// ============================================================
+// A bullish BOS occurs when the close crosses above the most
+// recent confirmed swing high; bearish BOS when it crosses
+// below the most recent confirmed swing low.
+bos_ph = ta.pivothigh(high, i_boslen, i_boslen)
+bos_pl = ta.pivotlow (low,  i_boslen, i_boslen)
+
+var float bos_sh      = na
+var int   bos_sh_bar  = na
+var bool  bos_sh_ok   = false
+var float bos_sl      = na
+var int   bos_sl_bar  = na
+var bool  bos_sl_ok   = false
+
+if not na(bos_ph)
+    bos_sh     := bos_ph
+    bos_sh_bar := bar_index[i_boslen]
+    bos_sh_ok  := true
+
+if not na(bos_pl)
+    bos_sl     := bos_pl
+    bos_sl_bar := bar_index[i_boslen]
+    bos_sl_ok  := true
+
+if i_bos and bos_sh_ok and not na(bos_sh) and close > bos_sh
+    line.new(bos_sh_bar, bos_sh, bar_index, bos_sh,
+             color=c_bbos, style=line.style_solid, width=2)
+    label.new(bar_index, bos_sh, "BOS ▲",
+              style=label.style_label_up,
+              color=color.new(c_bbos, 70), textcolor=c_bbos, size=size.small)
+    bos_sh_ok := false
+
+if i_bos and bos_sl_ok and not na(bos_sl) and close < bos_sl
+    line.new(bos_sl_bar, bos_sl, bar_index, bos_sl,
+             color=c_beos, style=line.style_solid, width=2)
+    label.new(bar_index, bos_sl, "BOS ▼",
+              style=label.style_label_down,
+              color=color.new(c_beos, 70), textcolor=c_beos, size=size.small)
+    bos_sl_ok := false
+
+// ============================================================
+//  F A I R   V A L U E   G A P S
+// ============================================================
+// Three-candle structure (c1=bar[2], c2=bar[1], c3=bar[0]):
+//   Bullish FVG → c3.low  > c1.high  (upward gap)
+//   Bearish FVG → c3.high < c1.low   (downward gap)
+// The box spans the gap zone, extending i_fvgext bars to the right.
+bull_fvg = i_fvg and low > high[2]
+bear_fvg = i_fvg and high < low[2]
+
+if bull_fvg
+    box.new(bar_index - 2, low, bar_index - 2 + i_fvgext, high[2],
+            bgcolor=c_bfvg, border_color=color.new(color.green, 20), border_width=1)
+
+if bear_fvg
+    box.new(bar_index - 2, low[2], bar_index - 2 + i_fvgext, high,
+            bgcolor=c_befvg, border_color=color.new(color.red, 20), border_width=1)
+
+// ============================================================
+//  B R E A K A W A Y   G A P S
+// ============================================================
+// A breakaway gap is present when the opening price leaves a
+// clear void above the prior high (up gap) or below the prior
+// low (down gap) by at least i_bagatr × ATR(14).
+bg_up = i_bag and (open - high[1]) >= i_bagatr * atr14
+bg_dn = i_bag and (low[1] - open)  >= i_bagatr * atr14
+
+if bg_up
+    box.new(bar_index - 1, open, bar_index + 20, high[1],
+            bgcolor=c_ubag, border_color=color.new(color.teal, 20), border_width=1)
+    label.new(bar_index, (open + high[1]) / 2, "BAG ↑",
+              style=label.style_label_right,
+              color=color.new(c_ubag, 40), textcolor=color.white, size=size.tiny)
+
+if bg_dn
+    box.new(bar_index - 1, low[1], bar_index + 20, open,
+            bgcolor=c_dbag, border_color=color.new(color.orange, 20), border_width=1)
+    label.new(bar_index, (low[1] + open) / 2, "BAG ↓",
+              style=label.style_label_right,
+              color=color.new(c_dbag, 40), textcolor=color.white, size=size.tiny)
+
+// ============================================================
+//  4H   B R E A K E R   B L O C K S
+// ============================================================
+// A breaker block is the swing-origin candle of an order block
+// whose level has subsequently been broken by price.
+//   Bullish breaker → 4H price clears a confirmed 4H swing high:
+//                     the zone below that high becomes support.
+//   Bearish breaker → 4H price breaks a confirmed 4H swing low:
+//                     the zone above that low becomes resistance.
+//
+// The block height is derived from the ATR at the 4H timeframe
+// so it remains proportional across all base timeframes.
+h4_atr = request.security(syminfo.tickerid, "240",
+         ta.atr(14), lookahead=barmerge.lookahead_off)
+
+h4_ph_val = request.security(syminfo.tickerid, "240",
+            ta.pivothigh(high, 5, 5), lookahead=barmerge.lookahead_off)
+h4_pl_val = request.security(syminfo.tickerid, "240",
+            ta.pivotlow (low,  5, 5), lookahead=barmerge.lookahead_off)
+
+h4_close = request.security(syminfo.tickerid, "240",
+           close, lookahead=barmerge.lookahead_off)
+
+var float h4_last_ph    = na
+var bool  h4_ph_intact  = false
+var float h4_last_pl    = na
+var bool  h4_pl_intact  = false
+
+if not na(h4_ph_val) and h4_ph_val != h4_last_ph
+    h4_last_ph   := h4_ph_val
+    h4_ph_intact := true
+
+if not na(h4_pl_val) and h4_pl_val != h4_last_pl
+    h4_last_pl   := h4_pl_val
+    h4_pl_intact := true
+
+// Bullish breaker: 4H close clears last confirmed 4H swing high
+if i_bb and h4_ph_intact and not na(h4_last_ph) and new_4h and h4_close > h4_last_ph
+    bb_top = h4_last_ph
+    bb_bot = h4_last_ph - nz(h4_atr, atr14) * 0.5
+    box.new(bar_index - i_bbext, bb_top, bar_index, bb_bot,
+            bgcolor=c_bubb, border_color=color.new(color.green, 20), border_width=1)
+    label.new(bar_index, h4_last_ph, "BB ▲",
+              style=label.style_label_right,
+              color=color.new(c_bubb, 40), textcolor=color.white, size=size.tiny)
+    h4_ph_intact := false
+
+// Bearish breaker: 4H close breaks below last confirmed 4H swing low
+if i_bb and h4_pl_intact and not na(h4_last_pl) and new_4h and h4_close < h4_last_pl
+    bb_top = h4_last_pl + nz(h4_atr, atr14) * 0.5
+    bb_bot = h4_last_pl
+    box.new(bar_index - i_bbext, bb_top, bar_index, bb_bot,
+            bgcolor=c_bebb, border_color=color.new(color.red, 20), border_width=1)
+    label.new(bar_index, h4_last_pl, "BB ▼",
+              style=label.style_label_right,
+              color=color.new(c_bebb, 40), textcolor=color.white, size=size.tiny)
+    h4_pl_intact := false
+
+// ============================================================
+//  S U N D A Y – M O N D A Y   O P E N I N G   R A N G E
+// ============================================================
+// Captures the combined range from the first Sunday bar through
+// to the end of Monday.  Draws the range box and a midpoint
+// dashed line once Monday is complete.
+//
+// Note: on exchanges/sessions where Sunday bars do not exist
+// (e.g. equities), the range will be built from Monday alone.
+is_sun  = dayofweek == dayofweek.sunday
+is_mon  = dayofweek == dayofweek.monday
+new_sun = is_sun and not is_sun[1]
+
+var float smor_h    = na
+var float smor_l    = na
+var int   smor_sbar = na
+var bool  smor_bld  = false
+var box   bx_smor   = na
+var line  l_smorm   = na
+
+if new_sun
+    box.delete(bx_smor)
+    line.delete(l_smorm)
+    smor_h    := high
+    smor_l    := low
+    smor_sbar := bar_index
+    smor_bld  := true
+
+// On Forex / crypto markets the week opens on Sunday; fall back
+// to Monday if there are no Sunday bars.
+new_mon = is_mon and not is_mon[1]
+if new_mon and not smor_bld
+    box.delete(bx_smor)
+    line.delete(l_smorm)
+    smor_h    := high
+    smor_l    := low
+    smor_sbar := bar_index
+    smor_bld  := true
+
+if smor_bld and (is_sun or is_mon)
+    smor_h := math.max(smor_h, high)
+    smor_l := math.min(smor_l, low)
+
+// Finalise when the first non-Sunday / non-Monday bar arrives
+if smor_bld and not is_sun and not is_mon
+    smor_bld := false
+    if i_smor and not na(smor_sbar)
+        smor_mid = (smor_h + smor_l) / 2
+        bx_smor  := box.new(smor_sbar, smor_h, bar_index, smor_l,
+                            bgcolor=c_smor,
+                            border_color=color.new(#607D8B, 40))
+        l_smorm  := line.new(smor_sbar, smor_mid, bar_index + 500, smor_mid,
+                             color=c_smorm, style=line.style_dashed, width=1)
+
+// ============================================================
+//  D E V I A T I O N   Z O N E S
+// ============================================================
+// Projects up to six equidistant ATR-based extension levels
+// above the range high and below the range low.
+// Source can be the completed SMOR, previous-day or previous-week range.
+var float dev_h = na
+var float dev_l = na
+
+if i_devsrc == "SMOR"
+    if not smor_bld and not na(smor_h)
+        dev_h := smor_h
+        dev_l := smor_l
+else if i_devsrc == "Daily"
+    dev_h := pdh
+    dev_l := pdl
+else
+    dev_h := pwh
+    dev_l := pwl
+
+dev_unit = nz(atr14) * i_devmul
+
+// Redraw trigger: new week/day boundary, or SMOR just finalised
+smor_just_done = smor_bld[1] and not smor_bld   // transitions false on finalisation bar
+
+should_redraw_dev = i_dev and not na(dev_h) and not na(dev_l) and
+     ((i_devsrc == "SMOR"   and smor_just_done) or
+      (i_devsrc == "Daily"  and new_day)        or
+      (i_devsrc == "Weekly" and new_week))
+
+var line[]  dev_l_up  = array.new_line()
+var line[]  dev_l_dn  = array.new_line()
+var label[] dev_lb_up = array.new_label()
+var label[] dev_lb_dn = array.new_label()
+
+if should_redraw_dev and dev_unit > 0
+    // Remove previous deviation drawings
+    for ln in dev_l_up
+        line.delete(ln)
+    for ln in dev_l_dn
+        line.delete(ln)
+    for lb in dev_lb_up
+        label.delete(lb)
+    for lb in dev_lb_dn
+        label.delete(lb)
+    array.clear(dev_l_up)
+    array.clear(dev_l_dn)
+    array.clear(dev_lb_up)
+    array.clear(dev_lb_dn)
+
+    for i = 1 to i_devn
+        // Transparency increases with each level (closer levels are more opaque)
+        transp  = math.min(90, int(float(i) / float(i_devn) * 70.0))
+        col     = color.new(c_dev, transp)
+        up_lvl  = dev_h + dev_unit * i
+        dn_lvl  = dev_l - dev_unit * i
+
+        array.push(dev_l_up, line.new(bar_index, up_lvl, bar_index + 300, up_lvl,
+                                      color=col, style=line.style_dotted, width=1))
+        array.push(dev_l_dn, line.new(bar_index, dn_lvl, bar_index + 300, dn_lvl,
+                                      color=col, style=line.style_dotted, width=1))
+        array.push(dev_lb_up, label.new(bar_index, up_lvl,
+                                        "Dev +" + str.tostring(i),
+                                        style=label.style_label_right,
+                                        color=color.new(c_dev, 80),
+                                        textcolor=c_dev, size=size.tiny))
+        array.push(dev_lb_dn, label.new(bar_index, dn_lvl,
+                                        "Dev −" + str.tostring(i),
+                                        style=label.style_label_right,
+                                        color=color.new(c_dev, 80),
+                                        textcolor=c_dev, size=size.tiny))
