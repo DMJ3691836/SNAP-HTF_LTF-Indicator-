@@ -27,7 +27,7 @@ if show_weekly_liquidity
     hline(weekly_lowest, "Major Buyside Liquidity Pool (Weekly)", color=color.orange, linestyle=hline.style_dashed, linewidth=2)
     hline(weekly_highest, "Major Sell-Side Liquidity Pool (Weekly)", color=color.orange, linestyle=hline.style_dashed, linewidth=2)
 
-// Weekly DRT Levels (Premium High Wick) - Gantt Box
+// Weekly DRT Levels (Premium High Wick) - Dynamic Update
 if show_weekly_drt
     weekly_wick_high = weekly_high
     weekly_body_close = weekly_close
@@ -40,12 +40,10 @@ if show_weekly_drt
     weekly_drt_075 = weekly_body_close + (weekly_wick_range * 0.75)
     weekly_drt_1 = weekly_wick_high
     
-    // Draw Weekly DRT Gantt Box (Color Coordinated)
-    box_width = 5
-    box.new(bar_index - box_width, weekly_drt_0, bar_index, weekly_drt_025, border_color=color.new(color.purple, 0), bgcolor=color.new(color.purple, 80), closed=true)
-    box.new(bar_index - box_width, weekly_drt_025, bar_index, weekly_drt_05, border_color=color.new(color.blue, 0), bgcolor=color.new(color.blue, 80), closed=true)
-    box.new(bar_index - box_width, weekly_drt_05, bar_index, weekly_drt_075, border_color=color.new(color.green, 0), bgcolor=color.new(color.green, 80), closed=true)
-    box.new(bar_index - box_width, weekly_drt_075, bar_index, weekly_drt_1, border_color=color.new(color.red, 0), bgcolor=color.new(color.red, 80), closed=true)
+    // Draw Weekly DRT Levels as horizontal lines (dynamic)
+    hline(weekly_drt_025, "Weekly DRT 0.25", color=color.new(color.purple, 50), linestyle=hline.style_dotted, linewidth=1)
+    hline(weekly_drt_05, "Weekly DRT 0.5", color=color.new(color.blue, 50), linestyle=hline.style_dotted, linewidth=1)
+    hline(weekly_drt_075, "Weekly DRT 0.75", color=color.new(color.green, 50), linestyle=hline.style_dotted, linewidth=1)
 
 // Weekly Sell-Side Inefficiency Zone
 if show_weekly_sell_inefficiency
@@ -121,8 +119,6 @@ if show_daily_imbalance
 // 20-Day Lookback Vertical Line
 lookback_days = input.int(20, "Lookback Days", minval=1, maxval=100, group="Daily Timeframe")
 if show_daily_20d_filter
-    line.new(bar_index - lookback_days, ta.highest(high, lookback_days * 24), bar_index - lookback_days, ta.lowest(low, lookback_days * 24), color=color.blue, width=2)
-    
     high_20d = ta.highest(daily_high, lookback_days)
     low_20d = ta.lowest(daily_low, lookback_days)
     
@@ -286,4 +282,3 @@ if barstate.isfirst
     status_text = close > ta.lowest(daily_low, lookback_days) + (ta.highest(daily_high, lookback_days) - ta.lowest(daily_low, lookback_days)) * 0.5 ? "Bullish" : "Bearish"
     status_color = close > ta.lowest(daily_low, lookback_days) + (ta.highest(daily_high, lookback_days) - ta.lowest(daily_low, lookback_days)) * 0.5 ? color.green : color.red
     table.cell(dashboard, 1, 6, status_text, text_color=status_color, bgcolor=color.new(color.gray, 50))
-
