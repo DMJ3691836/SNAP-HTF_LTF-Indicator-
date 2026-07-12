@@ -41,11 +41,14 @@ if show_weekly_drt
     weekly_drt_1 = weekly_wick_high
     
     // Draw Weekly DRT Gantt Box (Color Coordinated)
-    box_width = 5
-    box.new(bar_index - box_width, weekly_drt_0, bar_index, weekly_drt_025, border_color=color.new(color.purple, 0), bgcolor=color.new(color.purple, 80), closed=true)
-    box.new(bar_index - box_width, weekly_drt_025, bar_index, weekly_drt_05, border_color=color.new(color.blue, 0), bgcolor=color.new(color.blue, 80), closed=true)
-    box.new(bar_index - box_width, weekly_drt_05, bar_index, weekly_drt_075, border_color=color.new(color.green, 0), bgcolor=color.new(color.green, 80), closed=true)
-    box.new(bar_index - box_width, weekly_drt_075, bar_index, weekly_drt_1, border_color=color.new(color.red, 0), bgcolor=color.new(color.red, 80), closed=true)
+    // Use xloc.bar_time so the box stays anchored to real time across all timeframes
+    int bar_ms = timeframe.in_seconds() * 1000
+    int drt_right_t = time + bar_ms
+    int drt_left_t  = drt_right_t - 5 * bar_ms  // matches original box_width=5 offset
+    box.new(drt_left_t, weekly_drt_0,   drt_right_t, weekly_drt_025, xloc=xloc.bar_time, border_color=color.new(color.purple, 0), bgcolor=color.new(color.purple, 80))
+    box.new(drt_left_t, weekly_drt_025, drt_right_t, weekly_drt_05,  xloc=xloc.bar_time, border_color=color.new(color.blue,   0), bgcolor=color.new(color.blue,   80))
+    box.new(drt_left_t, weekly_drt_05,  drt_right_t, weekly_drt_075, xloc=xloc.bar_time, border_color=color.new(color.green,  0), bgcolor=color.new(color.green,  80))
+    box.new(drt_left_t, weekly_drt_075, drt_right_t, weekly_drt_1,   xloc=xloc.bar_time, border_color=color.new(color.red,    0), bgcolor=color.new(color.red,    80))
 
 // Weekly Sell-Side Inefficiency Zone
 if show_weekly_sell_inefficiency
@@ -121,7 +124,8 @@ if show_daily_imbalance
 // 20-Day Lookback Vertical Line
 lookback_days = input.int(20, "Lookback Days", minval=1, maxval=100, group="Daily Timeframe")
 if show_daily_20d_filter
-    line.new(bar_index - lookback_days, ta.highest(high, lookback_days * 24), bar_index - lookback_days, ta.lowest(low, lookback_days * 24), color=color.blue, width=2)
+    int lookback_ms = lookback_days * 86400000  // convert days to milliseconds
+    line.new(time - lookback_ms, ta.highest(high, lookback_days * 24), time - lookback_ms, ta.lowest(low, lookback_days * 24), xloc=xloc.bar_time, color=color.blue, width=2)
     
     high_20d = ta.highest(daily_high, lookback_days)
     low_20d = ta.lowest(daily_low, lookback_days)
@@ -213,25 +217,25 @@ h1_close = request.security(syminfo.tickerid, "60", close)
 // Get Sunday 6 PM and Monday 12 AM (00:00) Opening Times
 var float sunday_6pm_price = na
 var float monday_12am_price = na
-var int sunday_6pm_bar = na
-var int monday_12am_bar = na
+var int sunday_6pm_time = na
+var int monday_12am_time = na
 
 // Detect Sunday 6 PM (18:00) and Monday 12 AM (00:00)
 if dayofweek == dayofweek.sunday and hour == 18
     sunday_6pm_price := open
-    sunday_6pm_bar := bar_index
+    sunday_6pm_time  := time
 
 if dayofweek == dayofweek.monday and hour == 0
     monday_12am_price := open
-    monday_12am_bar := bar_index
+    monday_12am_time  := time
 
 // Draw Week Opening Lines
 if show_1h_week_open
-    if not na(sunday_6pm_bar)
-        line.new(sunday_6pm_bar, ta.highest(high, 500), sunday_6pm_bar, ta.lowest(low, 500), color=color.green, width=2)
+    if not na(sunday_6pm_time)
+        line.new(sunday_6pm_time, ta.highest(high, 500), sunday_6pm_time, ta.lowest(low, 500), xloc=xloc.bar_time, color=color.green, width=2)
     
-    if not na(monday_12am_bar)
-        line.new(monday_12am_bar, ta.highest(high, 500), monday_12am_bar, ta.lowest(low, 500), color=color.green, width=2)
+    if not na(monday_12am_time)
+        line.new(monday_12am_time, ta.highest(high, 500), monday_12am_time, ta.lowest(low, 500), xloc=xloc.bar_time, color=color.green, width=2)
 
 // 1-Hour Opening Range (Sunday 6 PM to Monday 12 AM)
 if show_1h_week_range
