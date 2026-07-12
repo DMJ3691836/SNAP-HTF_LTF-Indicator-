@@ -108,7 +108,7 @@ int MAX_BAR_OFFSET = 5000  // Maximum bars we can safely reference in either dir
 // Analytical functions, evaluated inside request.security()
 //==============================================================================
 
-f_week_pack(_lookback) =>
+f_week_pack(int _lookback) =>
      // ta.highestbars() returns a negative bar offset, while the history
      // operator [] requires a non-negative number of bars back.
      int highestOffset = ta.highestbars(high, _lookback)
@@ -119,32 +119,32 @@ f_week_pack(_lookback) =>
      float wickBase = not na(barsBack) ? math.max(open[barsBack], close[barsBack]) : na
      [majorHi, majorLo, wickHi, wickBase]
 
-f_equal_high(_left, _right, _tolAtr) =>
+f_equal_high(int _left, int _right, float _tolAtr) =>
      float ph = ta.pivothigh(high, _left, _right)
      float prev = ta.valuewhen(not na(ph), ph, 1)
      bool matched = not na(ph) and not na(prev) and math.abs(ph - prev) <= ta.atr(14) * _tolAtr
      float eq = matched ? (ph + prev) * 0.5 : na
      ta.valuewhen(not na(eq), eq, 0)
 
-f_equal_low(_left, _right, _tolAtr) =>
+f_equal_low(int _left, int _right, float _tolAtr) =>
      float pl = ta.pivotlow(low, _left, _right)
      float prev = ta.valuewhen(not na(pl), pl, 1)
      bool matched = not na(pl) and not na(prev) and math.abs(pl - prev) <= ta.atr(14) * _tolAtr
      float eq = matched ? (pl + prev) * 0.5 : na
      ta.valuewhen(not na(eq), eq, 0)
 
-f_pivot_high(_left, _right, _occurrence) =>
+f_pivot_high(int _left, int _right, int _occurrence) =>
      float ph = ta.pivothigh(high, _left, _right)
      ta.valuewhen(not na(ph), ph, _occurrence)
 
-f_bear_fvg(_occurrence) =>
+f_bear_fvg(int _occurrence) =>
      bool cond = high < low[2]
      float top = ta.valuewhen(cond, low[2], _occurrence)
      float bottom = ta.valuewhen(cond, high, _occurrence)
      int started = ta.valuewhen(cond, time, _occurrence)
      [top, bottom, started]
 
-f_bull_fvg(_occurrence) =>
+f_bull_fvg(int _occurrence) =>
      bool cond = low > high[2]
      float top = ta.valuewhen(cond, low, _occurrence)
      float bottom = ta.valuewhen(cond, high[2], _occurrence)
@@ -155,7 +155,7 @@ f_bull_fvg(_occurrence) =>
 // 1) A confirmed pivot high is raided.
 // 2) The last confirmed swing low is armed.
 // 3) Price closes below that low with a recent bearish FVG.
-f_bear_bos(_left, _right) =>
+f_bear_bos(int _left, int _right) =>
      float ph = ta.pivothigh(high, _left, _right)
      float pl = ta.pivotlow(low, _left, _right)
 
@@ -187,7 +187,7 @@ f_bear_bos(_left, _right) =>
 // 1) A confirmed pivot low is raided.
 // 2) The last confirmed swing high is armed.
 // 3) Price closes above that high with a recent bullish FVG.
-f_bull_bos(_left, _right) =>
+f_bull_bos(int _left, int _right) =>
      float ph = ta.pivothigh(high, _left, _right)
      float pl = ta.pivotlow(low, _left, _right)
 
@@ -215,19 +215,19 @@ f_bull_bos(_left, _right) =>
 
      bos
 
-f_minor_buyside(_lookback, _left, _right) =>
+f_minor_buyside(int _lookback, int _left, int _right) =>
      float majorHi = ta.highest(high, _lookback)
      float ph = ta.pivothigh(high, _left, _right)
      bool nested = not na(ph) and ph < majorHi
      ta.valuewhen(nested, ph, 0)
 
-f_daily_pack(_lookback) =>
+f_daily_pack(int _lookback) =>
      float hi = ta.highest(high, _lookback)
      float lo = ta.lowest(low, _lookback)
      int lookbackTime = time[_lookback]
      [hi, lo, lookbackTime]
 
-f_breakaway_gap(_lookback) =>
+f_breakaway_gap(int _lookback) =>
      float priorHi = ta.highest(high[1], _lookback)
      float priorLo = ta.lowest(low[1], _lookback)
      float mid = priorLo + (priorHi - priorLo) * 0.5
@@ -238,7 +238,7 @@ f_breakaway_gap(_lookback) =>
      int started = ta.valuewhen(displaced, time, 0)
      [top, bottom, started]
 
-f_imbalance_below_equal_lows(_left, _right, _tolAtr) =>
+f_imbalance_below_equal_lows(int _left, int _right, float _tolAtr) =>
      float pl = ta.pivotlow(low, _left, _right)
      float prev = ta.valuewhen(not na(pl), pl, 1)
      bool matched = not na(pl) and not na(prev) and math.abs(pl - prev) <= ta.atr(14) * _tolAtr
@@ -260,7 +260,7 @@ f_imbalance_below_equal_lows(_left, _right, _tolAtr) =>
 // Bearish 4H breaker proxy:
 // Raid a confirmed high, then close below the armed swing low.
 // The zone is the last up-close candle before the break.
-f_bear_breaker(_left, _right) =>
+f_bear_breaker(int _left, int _right) =>
      float ph = ta.pivothigh(high, _left, _right)
      float pl = ta.pivotlow(low, _left, _right)
 
@@ -302,7 +302,7 @@ f_bear_breaker(_left, _right) =>
 // Bullish mirror:
 // Raid a confirmed low, then close above the armed swing high.
 // The zone is the last down-close candle before the break.
-f_bull_breaker(_left, _right) =>
+f_bull_breaker(int _left, int _right) =>
      float ph = ta.pivothigh(high, _left, _right)
      float pl = ta.pivotlow(low, _left, _right)
 
@@ -342,7 +342,7 @@ f_bull_breaker(_left, _right) =>
      [zoneTop, zoneBottom, zoneTime]
 
 // Sunday 18:00 through Monday 00:00 opening range, calculated on 1H bars.
-f_sunday_monday_range(_timezone) =>
+f_sunday_monday_range(string _timezone) =>
      int d = dayofweek(time, _timezone)
      int h = hour(time, _timezone)
 
@@ -376,7 +376,7 @@ f_sunday_monday_range(_timezone) =>
 //==============================================================================
 
 f_draw_level(array<line> _lines, array<label> _labels, int _idx, bool _show,
-     int _x1, int _x2, float _y, string _text, color _color, int _width, _style) =>
+     int _x1, int _x2, float _y, string _text, color _color, int _width, string _style) =>
      line ln = array.get(_lines, _idx)
      label lb = array.get(_labels, _idx)
      bool valid = _show and not na(_y)
@@ -532,7 +532,7 @@ f_draw_time_zone(array<box> _boxes, array<line> _mids, int _idx, bool _show,
              array.set(_mids, _idx, na)
 
 f_draw_time_line(array<line> _lines, int _idx, bool _show,
-     int _x1, float _y1, int _x2, float _y2, color _color, int _width, _style) =>
+     int _x1, float _y1, int _x2, float _y2, color _color, int _width, string _style) =>
      line ln = array.get(_lines, _idx)
      bool valid = _show and not na(_x1) and not na(_x2) and not na(_y1) and not na(_y2)
 
@@ -608,7 +608,7 @@ f_draw_projection(array<box> _boxes, array<line> _mids, bool _show,
                  line.delete(mid)
                  array.set(_mids, i, na)
 
-f_grade(_price, _low, _high) =>
+f_grade(float _price, float _low, float _high) =>
      string result = "n/a"
      if not na(_price) and not na(_low) and not na(_high) and _high > _low
          float p = (_price - _low) / (_high - _low)
