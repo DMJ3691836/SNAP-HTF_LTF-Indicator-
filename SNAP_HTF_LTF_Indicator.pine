@@ -27,7 +27,7 @@ if show_weekly_liquidity
     hline(weekly_lowest, "Major Buyside Liquidity Pool (Weekly)", color=color.orange, linestyle=hline.style_dashed, linewidth=2)
     hline(weekly_highest, "Major Sell-Side Liquidity Pool (Weekly)", color=color.orange, linestyle=hline.style_dashed, linewidth=2)
 
-// Weekly DRT Levels (Premium High Wick) - Dynamic Update
+// Weekly DRT Levels (Premium High Wick)
 if show_weekly_drt
     weekly_wick_high = weekly_high
     weekly_body_close = weekly_close
@@ -40,7 +40,7 @@ if show_weekly_drt
     weekly_drt_075 = weekly_body_close + (weekly_wick_range * 0.75)
     weekly_drt_1 = weekly_wick_high
     
-    // Draw Weekly DRT Levels as horizontal lines (dynamic)
+    // Draw Weekly DRT Levels
     hline(weekly_drt_025, "Weekly DRT 0.25", color=color.new(color.purple, 50), linestyle=hline.style_dotted, linewidth=1)
     hline(weekly_drt_05, "Weekly DRT 0.5", color=color.new(color.blue, 50), linestyle=hline.style_dotted, linewidth=1)
     hline(weekly_drt_075, "Weekly DRT 0.75", color=color.new(color.green, 50), linestyle=hline.style_dotted, linewidth=1)
@@ -57,7 +57,6 @@ if show_weekly_sell_inefficiency
 
 // Weekly BOS (Break of Structure)
 if show_weekly_bos
-    // BOS based on last swing low during buyside rally and subsequent drop below swing low
     weekly_swing_low = ta.lowest(weekly_low, 10)
     hline(weekly_swing_low, "Weekly BOS Level", color=color.red, linestyle=hline.style_solid, linewidth=2)
 
@@ -92,11 +91,9 @@ daily_current_low = ta.lowest(daily_low, 20)
 // Daily DRT Gantt Box
 if show_daily_drt
     daily_wick_range = daily_current_high - daily_current_low
-    daily_drt_0 = daily_current_low
     daily_drt_025 = daily_current_low + (daily_wick_range * 0.25)
     daily_drt_05 = daily_current_low + (daily_wick_range * 0.5)
     daily_drt_075 = daily_current_low + (daily_wick_range * 0.75)
-    daily_drt_1 = daily_current_high
     
     hline(daily_drt_025, "Daily DRT 0.25", color=color.new(color.purple, 50), linestyle=hline.style_dotted, linewidth=1)
     hline(daily_drt_05, "Daily DRT 0.5", color=color.new(color.blue, 50), linestyle=hline.style_dotted, linewidth=1)
@@ -116,7 +113,7 @@ if show_daily_imbalance
     hline(daily_imbalance_high, "Daily Sell Imbalance High", color=color.new(color.aqua, 60), linestyle=hline.style_dotted, linewidth=1)
     hline(daily_imbalance_mid, "Daily Imbalance 50%", color=color.new(color.white, 60), linestyle=hline.style_dotted, linewidth=1)
 
-// 20-Day Lookback Vertical Line
+// 20-Day Lookback Filter
 lookback_days = input.int(20, "Lookback Days", minval=1, maxval=100, group="Daily Timeframe")
 if show_daily_20d_filter
     high_20d = ta.highest(daily_high, lookback_days)
@@ -146,13 +143,11 @@ if show_daily_breakaway_gap
     range_20d = high_20d - low_20d
     drt_20d_05 = low_20d + (range_20d * 0.5)
     
-    // Detect if price broke through 0.5 DRT level
     if close > drt_20d_05
         hline(drt_20d_05, "Breakaway GAP", color=color.green, linestyle=hline.style_dashed, linewidth=2)
 
 // Daily BOS (Break of Structure)
 if show_daily_bos
-    daily_swing_high = ta.highest(daily_high, 5)
     daily_swing_low = ta.lowest(daily_low, 10)
     hline(daily_swing_low, "Daily BOS Level", color=color.red, linestyle=hline.style_solid, linewidth=2)
 
@@ -161,7 +156,6 @@ if show_daily_equal_lows
     daily_equal_low = ta.lowest(daily_low, 5)
     hline(daily_equal_low, "Institutional Level (Equal Lows)", color=color.white, linestyle=hline.style_solid, linewidth=2)
     
-    // Imbalance below equal lows
     equal_low_imbalance = daily_equal_low - (daily_current_high - daily_current_low) * 0.1
     hline(equal_low_imbalance, "Imbalance Below Equal Lows", color=color.new(color.white, 60), linestyle=hline.style_dotted, linewidth=1)
 
@@ -246,7 +240,6 @@ if show_1h_projected_zones
         week_range_low = math.min(sunday_6pm_price, monday_12am_price)
         range_size = week_range_high - week_range_low
         
-        // Project 6 deviations higher
         for i = 1 to 6
             projected_high = week_range_high + (range_size * i)
             hline(projected_high, "1H Projected Zone " + str.tostring(i), color=color.new(color.white, 70), linestyle=hline.style_dotted, linewidth=1)
