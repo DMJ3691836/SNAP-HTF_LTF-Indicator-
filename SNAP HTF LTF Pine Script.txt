@@ -123,7 +123,7 @@ f_safe_hist_index(_barsBack) =>
     not na(_barsBack) and _barsBack >= 0 and _barsBack <= bar_index ? _barsBack : na
 
 f_safe_time_shift(_baseTime, _deltaMs) =>
-    float maxShiftMs = float(MAX_SAFE_TIME_OFFSET_DAYS) * MS_DAY
+    float maxShiftMs = float(MAX_SAFE_TIME_OFFSET_DAYS) * float(MS_DAY)
     float safeDeltaMs = math.max(-maxShiftMs, math.min(float(_deltaMs), maxShiftMs))
     not na(_baseTime) ? int(math.round(float(_baseTime) + safeDeltaMs)) : na
 
@@ -512,7 +512,7 @@ f_draw_time_zone(array<box> _boxes, array<line> _mids, int _idx, bool _show,
     box bx = slotValid ? array.get(_boxes, _idx) : na
     line mid = slotValid ? array.get(_mids, _idx) : na
     bool valid = slotValid and _show and not na(_leftTime) and not na(_rightTime) and
-         _rightTime > _leftTime and not na(_top) and not na(_bottom) and _top > _bottom
+         _rightTime >= _leftTime and not na(_top) and not na(_bottom) and _top > _bottom
 
     if valid
         float middle = (_top + _bottom) * 0.5
@@ -582,7 +582,7 @@ f_draw_projection(array<box> _boxes, array<line> _mids, bool _show,
             box bx = array.get(_boxes, i)
             line mid = array.get(_mids, i)
             bool activeZone = _show and i < safeCount and not na(_leftTime) and
-                 not na(_rightTime) and _rightTime > _leftTime and not na(_rangeLow) and _rangeSize > 0
+                 not na(_rightTime) and _rightTime >= _leftTime and not na(_rangeLow) and _rangeSize > 0
 
             if activeZone
                 float bottom = _above ?
