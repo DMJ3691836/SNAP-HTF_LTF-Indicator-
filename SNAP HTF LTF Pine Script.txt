@@ -99,8 +99,9 @@ int dashboardRows = 7
 // Constants
 //==============================================================================
 
-int MS_HOUR = 60 * 60 * 1000
-int MS_DAY  = 24 * MS_HOUR
+int MS_HOUR   = 60 * 60 * 1000
+int MS_DAY    = 24 * MS_HOUR
+float MS_PER_BAR = timeframe.in_seconds() * 1000
 
 //==============================================================================
 // Analytical functions, evaluated inside request.security()
@@ -469,6 +470,13 @@ f_draw_drt(array<box> _boxes, array<line> _lines, bool _show,
                 line.delete(ln)
                 array.set(_lines, i, na)
 
+// Convert a Unix timestamp (ms) to the nearest bar_index.
+// Uses the current bar as anchor so that both past and future times map
+// correctly regardless of zoom level or vertical-axis lock.
+// Guard against zero/negative MS_PER_BAR (e.g. tick charts).
+f_bar_from_time(int t) =>
+    not na(t) and MS_PER_BAR > 0 ? bar_index + math.round((t - time) / MS_PER_BAR) : na
+
 f_draw_time_zone(array<box> _boxes, array<line> _mids, int _idx, bool _show,
      int _leftTime, int _rightTime, float _top, float _bottom, string _text,
      color _border, color _fill) =>
@@ -478,15 +486,17 @@ f_draw_time_zone(array<box> _boxes, array<line> _mids, int _idx, bool _show,
          not na(_top) and not na(_bottom) and _top > _bottom
 
     if valid
+        int leftBar = f_bar_from_time(_leftTime)
+        int rightBar = f_bar_from_time(_rightTime)
         float middle = (_top + _bottom) * 0.5
         if na(bx)
-            bx := box.new(left=_leftTime, top=_top, right=_rightTime, bottom=_bottom,
-                 xloc=xloc.bar_time, border_color=_border, bgcolor=_fill,
+            bx := box.new(left=leftBar, top=_top, right=rightBar, bottom=_bottom,
+                 xloc=xloc.bar_index, border_color=_border, bgcolor=_fill,
                  text=_text, text_color=color.white, text_size=size.tiny)
             array.set(_boxes, _idx, bx)
         else
-            box.set_left(bx, _leftTime)
-            box.set_right(bx, _rightTime)
+            box.set_left(bx, leftBar)
+            box.set_right(bx, rightBar)
             box.set_top(bx, _top)
             box.set_bottom(bx, _bottom)
             box.set_border_color(bx, _border)
@@ -495,13 +505,13 @@ f_draw_time_zone(array<box> _boxes, array<line> _mids, int _idx, bool _show,
             box.set_text_color(bx, color.white)
 
         if na(mid)
-            mid := line.new(x1=_leftTime, y1=middle, x2=_rightTime, y2=middle,
-                 xloc=xloc.bar_time, color=color.new(_border, 5),
+            mid := line.new(x1=leftBar, y1=middle, x2=rightBar, y2=middle,
+                 xloc=xloc.bar_index, color=color.new(_border, 5),
                  style=line.style_dashed, width=1)
             array.set(_mids, _idx, mid)
         else
-            line.set_xy1(mid, _leftTime, middle)
-            line.set_xy2(mid, _rightTime, middle)
+            line.set_xy1(mid, leftBar, middle)
+            line.set_xy2(mid, rightBar, middle)
             line.set_color(mid, color.new(_border, 5))
             line.set_style(mid, line.style_dashed)
     else
@@ -518,13 +528,15 @@ f_draw_time_line(array<line> _lines, int _idx, bool _show,
     bool valid = _show and not na(_x1) and not na(_x2) and not na(_y1) and not na(_y2)
 
     if valid
+        int x1Bar = f_bar_from_time(_x1)
+        int x2Bar = f_bar_from_time(_x2)
         if na(ln)
-            ln := line.new(x1=_x1, y1=_y1, x2=_x2, y2=_y2, xloc=xloc.bar_time,
+            ln := line.new(x1=x1Bar, y1=_y1, x2=x2Bar, y2=_y2, xloc=xloc.bar_index,
                  color=_color, width=_width, style=_style)
             array.set(_lines, _idx, ln)
         else
-            line.set_xy1(ln, _x1, _y1)
-            line.set_xy2(ln, _x2, _y2)
+            line.set_xy1(ln, x1Bar, _y1)
+            line.set_xy2(ln, x2Bar, _y2)
             line.set_color(ln, _color)
             line.set_width(ln, _width)
             line.set_style(ln, _style)
@@ -536,6 +548,8 @@ f_draw_time_line(array<line> _lines, int _idx, bool _show,
 f_draw_projection(array<box> _boxes, array<line> _mids, bool _show,
      bool _above, int _count, int _leftTime, int _rightTime,
      float _rangeLow, float _rangeSize) =>
+    int leftBar = f_bar_from_time(_leftTime)
+    int rightBar = f_bar_from_time(_rightTime)
     for i = 0 to 5
         box bx = array.get(_boxes, i)
         line mid = array.get(_mids, i)
@@ -553,14 +567,14 @@ f_draw_projection(array<box> _boxes, array<line> _mids, bool _show,
             string zoneLabel = (_above ? "Zone " : "Sell Zone ") + str.tostring(i + 1)
 
             if na(bx)
-                bx := box.new(left=_leftTime, top=top, right=_rightTime, bottom=bottom,
-                     xloc=xloc.bar_time, border_color=color.new(color.white, 25),
+                bx := box.new(left=leftBar, top=top, right=rightBar, bottom=bottom,
+                     xloc=xloc.bar_index, border_color=color.new(color.white, 25),
                      bgcolor=color.new(color.white, 93), text=zoneLabel,
                      text_color=color.new(color.white, 5), text_size=size.tiny)
                 array.set(_boxes, i, bx)
             else
-                box.set_left(bx, _leftTime)
-                box.set_right(bx, _rightTime)
+                box.set_left(bx, leftBar)
+                box.set_right(bx, rightBar)
                 box.set_top(bx, top)
                 box.set_bottom(bx, bottom)
                 box.set_text(bx, zoneLabel)
@@ -568,13 +582,13 @@ f_draw_projection(array<box> _boxes, array<line> _mids, bool _show,
                 box.set_bgcolor(bx, color.new(color.white, 93))
 
             if na(mid)
-                mid := line.new(x1=_leftTime, y1=middle, x2=_rightTime, y2=middle,
-                     xloc=xloc.bar_time, color=color.new(color.white, 15),
+                mid := line.new(x1=leftBar, y1=middle, x2=rightBar, y2=middle,
+                     xloc=xloc.bar_index, color=color.new(color.white, 15),
                      style=line.style_dashed)
                 array.set(_mids, i, mid)
             else
-                line.set_xy1(mid, _leftTime, middle)
-                line.set_xy2(mid, _rightTime, middle)
+                line.set_xy1(mid, leftBar, middle)
+                line.set_xy2(mid, rightBar, middle)
                 line.set_color(mid, color.new(color.white, 15))
                 line.set_style(mid, line.style_dashed)
         else
