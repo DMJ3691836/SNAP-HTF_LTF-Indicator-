@@ -101,6 +101,15 @@ int dashboardRows = 7
 
 int MS_HOUR = 60 * 60 * 1000
 int MS_DAY  = 24 * MS_HOUR
+int MAX_SAFE_TIME_OFFSET_DAYS = 3650
+int MAX_SWING_BARS = 20
+int MAX_WEEKLY_LOOKBACK = 520
+int MAX_DAILY_LOOKBACK = 100
+int MAX_PROJECTION_COUNT = 6
+int MIN_PROJECTION_HOURS = 12
+int MAX_PROJECTION_HOURS = 720
+int MAX_ZONE_PAST_DAYS = 1500
+int MAX_ZONE_FUTURE_DAYS = 365
 
 //==============================================================================
 // Analytical functions, evaluated inside request.security()
@@ -114,7 +123,7 @@ f_safe_hist_index(_barsBack) =>
     not na(_barsBack) and _barsBack >= 0 and _barsBack <= bar_index ? _barsBack : na
 
 f_safe_time_shift(_baseTime, _deltaMs) =>
-    float maxShiftMs = 3650.0 * MS_DAY
+    float maxShiftMs = float(MAX_SAFE_TIME_OFFSET_DAYS) * MS_DAY
     float safeDeltaMs = math.max(-maxShiftMs, math.min(float(_deltaMs), maxShiftMs))
     not na(_baseTime) ? int(math.round(float(_baseTime) + safeDeltaMs)) : na
 
@@ -246,8 +255,9 @@ f_daily_pack(_lookback) =>
 
 f_breakaway_gap(_lookback) =>
     int safeLookback = f_safe_lookback(_lookback)
-    float priorHi = bar_index > 0 ? ta.highest(high[1], safeLookback) : na
-    float priorLo = bar_index > 0 ? ta.lowest(low[1], safeLookback) : na
+    bool hasPriorWindow = bar_index >= safeLookback
+    float priorHi = hasPriorWindow ? ta.highest(high[1], safeLookback) : na
+    float priorLo = hasPriorWindow ? ta.lowest(low[1], safeLookback) : na
     float mid = not na(priorHi) and not na(priorLo) ? priorLo + (priorHi - priorLo) * 0.5 : na
     bool bullGap = low > high[2]
     bool displaced = not na(mid) and bullGap and close > mid and close[1] <= mid
@@ -502,7 +512,7 @@ f_draw_time_zone(array<box> _boxes, array<line> _mids, int _idx, bool _show,
     box bx = slotValid ? array.get(_boxes, _idx) : na
     line mid = slotValid ? array.get(_mids, _idx) : na
     bool valid = slotValid and _show and not na(_leftTime) and not na(_rightTime) and
-         _rightTime >= _leftTime and not na(_top) and not na(_bottom) and _top > _bottom
+         _rightTime > _leftTime and not na(_top) and not na(_bottom) and _top > _bottom
 
     if valid
         float middle = (_top + _bottom) * 0.5
@@ -565,14 +575,14 @@ f_draw_time_line(array<line> _lines, int _idx, bool _show,
 f_draw_projection(array<box> _boxes, array<line> _mids, bool _show,
      bool _above, int _count, int _leftTime, int _rightTime,
      float _rangeLow, float _rangeSize) =>
-    int slotCount = math.min(6, math.min(array.size(_boxes), array.size(_mids)))
+    int slotCount = math.min(math.min(MAX_PROJECTION_COUNT, array.size(_boxes)), array.size(_mids))
     int safeCount = math.max(0, math.min(_count, slotCount))
     if slotCount > 0
         for i = 0 to slotCount - 1
             box bx = array.get(_boxes, i)
             line mid = array.get(_mids, i)
             bool activeZone = _show and i < safeCount and not na(_leftTime) and
-                 not na(_rightTime) and _rightTime >= _leftTime and not na(_rangeLow) and _rangeSize > 0
+                 not na(_rightTime) and _rightTime > _leftTime and not na(_rangeLow) and _rangeSize > 0
 
             if activeZone
                 float bottom = _above ?
@@ -632,15 +642,15 @@ f_grade(_price, _low, _high) =>
 // Higher-timeframe data
 //==============================================================================
 
-int safeSwingLeft = math.max(1, math.min(swingLeft, 20))
-int safeSwingRight = math.max(1, math.min(swingRight, 20))
+int safeSwingLeft = math.max(1, math.min(swingLeft, MAX_SWING_BARS))
+int safeSwingRight = math.max(1, math.min(swingRight, MAX_SWING_BARS))
 float safeEqAtrTol = math.max(0.0, eqAtrTol)
-int safeWeeklyLookback = math.max(1, math.min(weeklyLookback, 520))
-int safeDailyLookback = math.max(1, math.min(dailyLookback, 100))
-int safeProjectionCount = math.max(1, math.min(projectionCount, 6))
-int safeProjectionHours = math.max(12, math.min(projectionHours, 720))
-int safeZonePastDays = math.max(0, math.min(zonePastDays, 1500))
-int safeZoneFutureDays = math.max(0, math.min(zoneFutureDays, 365))
+int safeWeeklyLookback = math.max(1, math.min(weeklyLookback, MAX_WEEKLY_LOOKBACK))
+int safeDailyLookback = math.max(1, math.min(dailyLookback, MAX_DAILY_LOOKBACK))
+int safeProjectionCount = math.max(1, math.min(projectionCount, MAX_PROJECTION_COUNT))
+int safeProjectionHours = math.max(MIN_PROJECTION_HOURS, math.min(projectionHours, MAX_PROJECTION_HOURS))
+int safeZonePastDays = math.max(0, math.min(zonePastDays, MAX_ZONE_PAST_DAYS))
+int safeZoneFutureDays = math.max(0, math.min(zoneFutureDays, MAX_ZONE_FUTURE_DAYS))
 
 // Weekly
 [wMajorHigh, wMajorLow, wWickHigh, wWickBase] = request.security(syminfo.tickerid, "W", f_week_pack(safeWeeklyLookback),
