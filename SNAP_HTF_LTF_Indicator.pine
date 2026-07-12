@@ -1,0 +1,289 @@
+//@version=5
+indicator("SNAP HTF_LTF Indicator - Multi-Timeframe Liquidity Analysis", shorttitle="SNAP HTF_LTF", overlay=true, max_boxes_count=500, max_lines_count=500)
+
+// ============================================================================
+// WEEKLY TIMEFRAME ANALYSIS
+// ============================================================================
+
+// Weekly Major Liquidity Pools
+show_weekly_liquidity = input(true, "Show Weekly Major Liquidity Pools", group="Weekly Timeframe")
+show_weekly_drt = input(true, "Show Weekly Premium DRT Gantt Box", group="Weekly Timeframe")
+show_weekly_sell_inefficiency = input(true, "Show Weekly Sell-Side Inefficiency Zones", group="Weekly Timeframe")
+show_weekly_bos = input(true, "Show Weekly BOS (Break of Structure)", group="Weekly Timeframe")
+show_weekly_liquidity_highs = input(true, "Show Weekly Liquidity Highs", group="Weekly Timeframe")
+
+// Weekly Calculations
+weekly_high = request.security(syminfo.tickerid, "W", high)
+weekly_low = request.security(syminfo.tickerid, "W", low)
+weekly_close = request.security(syminfo.tickerid, "W", close)
+weekly_open = request.security(syminfo.tickerid, "W", open)
+
+// Weekly Highest High and Lowest Low (Major Liquidity Pools)
+weekly_highest = ta.highest(weekly_high, 52)  // 52 weeks
+weekly_lowest = ta.lowest(weekly_low, 52)
+
+// Draw Weekly Major Buyside Liquidity Pool (Lowest Point)
+if show_weekly_liquidity
+    hline(weekly_lowest, "Major Buyside Liquidity Pool (Weekly)", color=color.orange, linestyle=hline.style_dashed, linewidth=2)
+    hline(weekly_highest, "Major Sell-Side Liquidity Pool (Weekly)", color=color.orange, linestyle=hline.style_dashed, linewidth=2)
+
+// Weekly DRT Levels (Premium High Wick) - Gantt Box
+if show_weekly_drt
+    weekly_wick_high = weekly_high
+    weekly_body_close = weekly_close
+    weekly_wick_range = weekly_wick_high - weekly_body_close
+    
+    // DRT Level Calculations: 0, 0.25, 0.5, 0.75, 1.0
+    weekly_drt_0 = weekly_body_close
+    weekly_drt_025 = weekly_body_close + (weekly_wick_range * 0.25)
+    weekly_drt_05 = weekly_body_close + (weekly_wick_range * 0.5)
+    weekly_drt_075 = weekly_body_close + (weekly_wick_range * 0.75)
+    weekly_drt_1 = weekly_wick_high
+    
+    // Draw Weekly DRT Gantt Box (Color Coordinated)
+    box_width = 5
+    box.new(bar_index - box_width, weekly_drt_0, bar_index, weekly_drt_025, border_color=color.new(color.purple, 0), bgcolor=color.new(color.purple, 80), closed=true)
+    box.new(bar_index - box_width, weekly_drt_025, bar_index, weekly_drt_05, border_color=color.new(color.blue, 0), bgcolor=color.new(color.blue, 80), closed=true)
+    box.new(bar_index - box_width, weekly_drt_05, bar_index, weekly_drt_075, border_color=color.new(color.green, 0), bgcolor=color.new(color.green, 80), closed=true)
+    box.new(bar_index - box_width, weekly_drt_075, bar_index, weekly_drt_1, border_color=color.new(color.red, 0), bgcolor=color.new(color.red, 80), closed=true)
+
+// Weekly Sell-Side Inefficiency Zone
+if show_weekly_sell_inefficiency
+    weekly_inefficiency_high = weekly_wick_high
+    weekly_inefficiency_low = weekly_body_close
+    weekly_inefficiency_mid = (weekly_inefficiency_high + weekly_inefficiency_low) / 2
+    
+    hline(weekly_inefficiency_high, "Weekly Sell Inefficiency High", color=color.white, linestyle=hline.style_dotted, linewidth=1)
+    hline(weekly_inefficiency_mid, "Weekly Sell Inefficiency 50%", color=color.white, linestyle=hline.style_dotted, linewidth=1)
+    hline(weekly_inefficiency_low, "Weekly Sell Inefficiency Low", color=color.white, linestyle=hline.style_dotted, linewidth=1)
+
+// Weekly BOS (Break of Structure)
+if show_weekly_bos
+    // BOS based on last swing low during buyside rally and subsequent drop below swing low
+    weekly_swing_low = ta.lowest(weekly_low, 10)
+    hline(weekly_swing_low, "Weekly BOS Level", color=color.red, linestyle=hline.style_solid, linewidth=2)
+
+// Weekly Liquidity Highs
+if show_weekly_liquidity_highs
+    weekly_liquidity_high = ta.highest(weekly_high, 26)  // 26 weeks
+    hline(weekly_liquidity_high, "Weekly Liquidity High", color=color.blue, linestyle=hline.style_dashed, linewidth=2)
+
+// ============================================================================
+// DAILY TIMEFRAME ANALYSIS
+// ============================================================================
+
+show_daily_drt = input(true, "Show Daily DRT Gantt Box", group="Daily Timeframe")
+show_daily_minor_buyside = input(true, "Show Daily Minor Buyside Liquidity", group="Daily Timeframe")
+show_daily_imbalance = input(true, "Show Daily Sell-Side Imbalance Zones", group="Daily Timeframe")
+show_daily_20d_filter = input(true, "Show 20-Day Lookback Filter", group="Daily Timeframe")
+show_daily_drt_20d = input(true, "Show 20-Day DRT Gantt Box", group="Daily Timeframe")
+show_daily_breakaway_gap = input(true, "Show Breakaway GAP Zones", group="Daily Timeframe")
+show_daily_bos = input(true, "Show Daily BOS", group="Daily Timeframe")
+show_daily_equal_lows = input(true, "Show Institutional Level (Equal Lows)", group="Daily Timeframe")
+
+// Daily Calculations
+daily_high = request.security(syminfo.tickerid, "D", high)
+daily_low = request.security(syminfo.tickerid, "D", low)
+daily_close = request.security(syminfo.tickerid, "D", close)
+daily_open = request.security(syminfo.tickerid, "D", open)
+
+// Daily Current Dealing Range (High and Low)
+daily_current_high = ta.highest(daily_high, 20)
+daily_current_low = ta.lowest(daily_low, 20)
+
+// Daily DRT Gantt Box
+if show_daily_drt
+    daily_wick_range = daily_current_high - daily_current_low
+    daily_drt_0 = daily_current_low
+    daily_drt_025 = daily_current_low + (daily_wick_range * 0.25)
+    daily_drt_05 = daily_current_low + (daily_wick_range * 0.5)
+    daily_drt_075 = daily_current_low + (daily_wick_range * 0.75)
+    daily_drt_1 = daily_current_high
+    
+    hline(daily_drt_025, "Daily DRT 0.25", color=color.new(color.purple, 50), linestyle=hline.style_dotted, linewidth=1)
+    hline(daily_drt_05, "Daily DRT 0.5", color=color.new(color.blue, 50), linestyle=hline.style_dotted, linewidth=1)
+    hline(daily_drt_075, "Daily DRT 0.75", color=color.new(color.green, 50), linestyle=hline.style_dotted, linewidth=1)
+
+// Daily Minor Buyside Liquidity
+if show_daily_minor_buyside
+    daily_minor_buyside = ta.lowest(daily_low, 10)
+    hline(daily_minor_buyside, "Daily Minor Buyside Liquidity", color=color.orange, linestyle=hline.style_dashed, linewidth=2)
+
+// Daily Sell-Side Imbalance Zones
+if show_daily_imbalance
+    daily_imbalance_high = ta.highest(daily_high, 5)
+    daily_imbalance_low = ta.lowest(daily_low, 5)
+    daily_imbalance_mid = (daily_imbalance_high + daily_imbalance_low) / 2
+    
+    hline(daily_imbalance_high, "Daily Sell Imbalance High", color=color.new(color.aqua, 60), linestyle=hline.style_dotted, linewidth=1)
+    hline(daily_imbalance_mid, "Daily Imbalance 50%", color=color.new(color.white, 60), linestyle=hline.style_dotted, linewidth=1)
+
+// 20-Day Lookback Vertical Line
+lookback_days = input(20, "Lookback Days", minval=1, maxval=100, group="Daily Timeframe")
+if show_daily_20d_filter
+    line.new(bar_index - lookback_days, ta.highest(high, lookback_days * 24), bar_index - lookback_days, ta.lowest(low, lookback_days * 24), color=color.blue, width=2)
+    
+    high_20d = ta.highest(daily_high, lookback_days)
+    low_20d = ta.lowest(daily_low, lookback_days)
+    
+    hline(high_20d, "Major High Day (20D)", color=color.fuchsia, linestyle=hline.style_dashed, linewidth=2)
+    hline(low_20d, "Major Low Day (20D)", color=color.fuchsia, linestyle=hline.style_dashed, linewidth=2)
+
+// 20-Day DRT Gantt Box
+if show_daily_drt_20d
+    high_20d = ta.highest(daily_high, lookback_days)
+    low_20d = ta.lowest(daily_low, lookback_days)
+    range_20d = high_20d - low_20d
+    
+    drt_20d_025 = low_20d + (range_20d * 0.25)
+    drt_20d_05 = low_20d + (range_20d * 0.5)
+    drt_20d_075 = low_20d + (range_20d * 0.75)
+    
+    hline(drt_20d_025, "20D DRT 0.25", color=color.new(color.purple, 40), linestyle=hline.style_dotted, linewidth=1)
+    hline(drt_20d_05, "20D DRT 0.5", color=color.new(color.blue, 40), linestyle=hline.style_dotted, linewidth=1)
+    hline(drt_20d_075, "20D DRT 0.75", color=color.new(color.green, 40), linestyle=hline.style_dotted, linewidth=1)
+
+// Breakaway GAP Zone
+if show_daily_breakaway_gap
+    high_20d = ta.highest(daily_high, lookback_days)
+    low_20d = ta.lowest(daily_low, lookback_days)
+    range_20d = high_20d - low_20d
+    drt_20d_05 = low_20d + (range_20d * 0.5)
+    
+    // Detect if price broke through 0.5 DRT level
+    if close > drt_20d_05
+        hline(drt_20d_05, "Breakaway GAP", color=color.green, linestyle=hline.style_dashed, linewidth=2)
+
+// Daily BOS (Break of Structure)
+if show_daily_bos
+    daily_swing_high = ta.highest(daily_high, 5)
+    daily_swing_low = ta.lowest(daily_low, 10)
+    hline(daily_swing_low, "Daily BOS Level", color=color.red, linestyle=hline.style_solid, linewidth=2)
+
+// Daily Equal Lows (Institutional Level)
+if show_daily_equal_lows
+    daily_equal_low = ta.lowest(daily_low, 5)
+    hline(daily_equal_low, "Institutional Level (Equal Lows)", color=color.white, linestyle=hline.style_solid, linewidth=2)
+    
+    // Imbalance below equal lows
+    equal_low_imbalance = daily_equal_low - (daily_current_high - daily_current_low) * 0.1
+    hline(equal_low_imbalance, "Imbalance Below Equal Lows", color=color.new(color.white, 60), linestyle=hline.style_dotted, linewidth=1)
+
+// ============================================================================
+// 4-HOUR TIMEFRAME ANALYSIS
+// ============================================================================
+
+show_4h_breaker_block = input(true, "Show 4H High-Probability Breaker Block", group="4-Hour Timeframe")
+show_4h_mapped_range = input(true, "Show 4H Mapped Range", group="4-Hour Timeframe")
+
+// 4-Hour Calculations
+h4_high = request.security(syminfo.tickerid, "240", high)
+h4_low = request.security(syminfo.tickerid, "240", low)
+h4_close = request.security(syminfo.tickerid, "240", close)
+
+// 4-Hour High-Probability Breaker Block
+if show_4h_breaker_block
+    h4_leg_low = ta.lowest(h4_low, 10)
+    h4_breaker_high = ta.highest(h4_high, 5)
+    
+    hline(h4_leg_low, "4H Breaker Block Low", color=color.white, linestyle=hline.style_solid, linewidth=2)
+    hline((h4_leg_low + h4_breaker_high) / 2, "4H Breaker Block 50%", color=color.white, linestyle=hline.style_dotted, linewidth=1)
+
+// 4-Hour Mapped Range
+if show_4h_mapped_range
+    h4_range_low = ta.lowest(h4_low, 20)
+    h4_range_high = ta.highest(h4_high, 20)
+    
+    hline(h4_range_high, "4H Mapped Range High", color=color.new(color.yellow, 50), linestyle=hline.style_dashed, linewidth=1)
+    hline(h4_range_low, "4H Mapped Range Low", color=color.new(color.yellow, 50), linestyle=hline.style_dashed, linewidth=1)
+
+// ============================================================================
+// 1-HOUR TIMEFRAME ANALYSIS
+// ============================================================================
+
+show_1h_week_open = input(true, "Show 1H Week Opening Lines", group="1-Hour Timeframe")
+show_1h_week_range = input(true, "Show 1H Week Opening Range", group="1-Hour Timeframe")
+show_1h_projected_zones = input(true, "Show 1H Projected Zones", group="1-Hour Timeframe")
+
+// 1-Hour Calculations
+h1_high = request.security(syminfo.tickerid, "60", high)
+h1_low = request.security(syminfo.tickerid, "60", low)
+h1_close = request.security(syminfo.tickerid, "60", close)
+
+// Get Sunday 6 PM and Monday 12 AM (00:00) Opening Times
+var float sunday_6pm_price = na
+var float monday_12am_price = na
+var int sunday_6pm_bar = na
+var int monday_12am_bar = na
+
+// Detect Sunday 6 PM (18:00) and Monday 12 AM (00:00)
+if dayofweek == dayofweek.sunday and hour == 18
+    sunday_6pm_price := open
+    sunday_6pm_bar := bar_index
+
+if dayofweek == dayofweek.monday and hour == 0
+    monday_12am_price := open
+    monday_12am_bar := bar_index
+
+// Draw Week Opening Lines
+if show_1h_week_open
+    if not na(sunday_6pm_bar)
+        line.new(sunday_6pm_bar, ta.highest(high, 500), sunday_6pm_bar, ta.lowest(low, 500), color=color.green, width=2)
+    
+    if not na(monday_12am_bar)
+        line.new(monday_12am_bar, ta.highest(high, 500), monday_12am_bar, ta.lowest(low, 500), color=color.green, width=2)
+
+// 1-Hour Opening Range (Sunday 6 PM to Monday 12 AM)
+if show_1h_week_range
+    if not na(sunday_6pm_price) and not na(monday_12am_price)
+        week_range_high = math.max(sunday_6pm_price, monday_12am_price)
+        week_range_low = math.min(sunday_6pm_price, monday_12am_price)
+        
+        hline(week_range_high, "1H Week Opening Range High", color=color.white, linestyle=hline.style_solid, linewidth=2)
+        hline(week_range_low, "1H Week Opening Range Low", color=color.white, linestyle=hline.style_solid, linewidth=2)
+        hline((week_range_high + week_range_low) / 2, "1H Week OR 50%", color=color.white, linestyle=hline.style_dotted, linewidth=1)
+
+// 1-Hour Projected Zones (6 Deviations)
+if show_1h_projected_zones
+    if not na(sunday_6pm_price) and not na(monday_12am_price)
+        week_range_high = math.max(sunday_6pm_price, monday_12am_price)
+        week_range_low = math.min(sunday_6pm_price, monday_12am_price)
+        range_size = week_range_high - week_range_low
+        
+        // Project 6 deviations higher
+        for i = 1 to 6
+            projected_high = week_range_high + (range_size * i)
+            hline(projected_high, "1H Projected Zone " + str.tostring(i), color=color.new(color.white, 70), linestyle=hline.style_dotted, linewidth=1)
+
+// ============================================================================
+// INFO PANEL
+// ============================================================================
+
+var table dashboard = na
+
+if barstate.isfirst
+    dashboard := table.new(position.top_right, 4, 12, frame_color=color.gray, frame_width=1, border_color=color.white, border_width=1)
+    
+    table.cell(dashboard, 0, 0, "SNAP HTF_LTF Analysis", text_color=color.white, bgcolor=color.navy, text_size=size.large)
+    table.cell(dashboard, 1, 0, "", text_color=color.white, bgcolor=color.navy)
+    table.cell(dashboard, 2, 0, "", text_color=color.white, bgcolor=color.navy)
+    table.cell(dashboard, 3, 0, "", text_color=color.white, bgcolor=color.navy)
+    
+    table.cell(dashboard, 0, 1, "Weekly High", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(dashboard, 1, 1, str.tostring(weekly_highest, "###0.00"), text_color=color.orange, bgcolor=color.new(color.gray, 50))
+    table.cell(dashboard, 0, 2, "Weekly Low", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(dashboard, 1, 2, str.tostring(weekly_lowest, "###0.00"), text_color=color.orange, bgcolor=color.new(color.gray, 50))
+    
+    table.cell(dashboard, 0, 3, "Daily High (20D)", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(dashboard, 1, 3, str.tostring(ta.highest(daily_high, lookback_days), "###0.00"), text_color=color.fuchsia, bgcolor=color.new(color.gray, 50))
+    table.cell(dashboard, 0, 4, "Daily Low (20D)", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(dashboard, 1, 4, str.tostring(ta.lowest(daily_low, lookback_days), "###0.00"), text_color=color.fuchsia, bgcolor=color.new(color.gray, 50))
+    
+    table.cell(dashboard, 0, 5, "Current Price", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(dashboard, 1, 5, str.tostring(close, "###0.00"), text_color=color.aqua, bgcolor=color.new(color.gray, 50))
+    
+    table.cell(dashboard, 0, 6, "Status", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    status_text = close > ta.lowest(daily_low, lookback_days) + (ta.highest(daily_high, lookback_days) - ta.lowest(daily_low, lookback_days)) * 0.5 ? "Bullish" : "Bearish"
+    status_color = close > ta.lowest(daily_low, lookback_days) + (ta.highest(daily_high, lookback_days) - ta.lowest(daily_low, lookback_days)) * 0.5 ? color.green : color.red
+    table.cell(dashboard, 1, 6, status_text, text_color=status_color, bgcolor=color.new(color.gray, 50))
+
