@@ -1,5 +1,5 @@
 //@version=6
-indicator("SNAP HTF_LTF v1.4", shorttitle="SNAP HTF_LTF", overlay=true,
+indicator("SNAP HTF_LTF v1.5", shorttitle="SNAP HTF_LTF", overlay=true,
      max_lines_count=500, max_boxes_count=500, max_labels_count=200,
      max_bars_back=600)
 
@@ -102,273 +102,274 @@ int dashboardRows = 7
 int MS_HOUR   = 60 * 60 * 1000
 int MS_DAY    = 24 * MS_HOUR
 float MS_PER_BAR = timeframe.in_seconds() * 1000
+int MAX_BAR_OFFSET = 5000  // Maximum bars we can safely reference in either direction
 
 //==============================================================================
 // Analytical functions, evaluated inside request.security()
 //==============================================================================
 
 f_week_pack(_lookback) =>
-    // ta.highestbars() returns a negative bar offset, while the history
-    // operator [] requires a non-negative number of bars back.
-    int highestOffset = ta.highestbars(high, _lookback)
-    int barsBack = not na(highestOffset) ? math.abs(highestOffset) : na
-    float majorHi = ta.highest(high, _lookback)
-    float majorLo = ta.lowest(low, _lookback)
-    float wickHi = not na(barsBack) ? high[barsBack] : na
-    float wickBase = not na(barsBack) ? math.max(open[barsBack], close[barsBack]) : na
-    [majorHi, majorLo, wickHi, wickBase]
+     // ta.highestbars() returns a negative bar offset, while the history
+     // operator [] requires a non-negative number of bars back.
+     int highestOffset = ta.highestbars(high, _lookback)
+     int barsBack = not na(highestOffset) ? math.abs(highestOffset) : na
+     float majorHi = ta.highest(high, _lookback)
+     float majorLo = ta.lowest(low, _lookback)
+     float wickHi = not na(barsBack) ? high[barsBack] : na
+     float wickBase = not na(barsBack) ? math.max(open[barsBack], close[barsBack]) : na
+     [majorHi, majorLo, wickHi, wickBase]
 
 f_equal_high(_left, _right, _tolAtr) =>
-    float ph = ta.pivothigh(high, _left, _right)
-    float prev = ta.valuewhen(not na(ph), ph, 1)
-    bool matched = not na(ph) and not na(prev) and math.abs(ph - prev) <= ta.atr(14) * _tolAtr
-    float eq = matched ? (ph + prev) * 0.5 : na
-    ta.valuewhen(not na(eq), eq, 0)
+     float ph = ta.pivothigh(high, _left, _right)
+     float prev = ta.valuewhen(not na(ph), ph, 1)
+     bool matched = not na(ph) and not na(prev) and math.abs(ph - prev) <= ta.atr(14) * _tolAtr
+     float eq = matched ? (ph + prev) * 0.5 : na
+     ta.valuewhen(not na(eq), eq, 0)
 
 f_equal_low(_left, _right, _tolAtr) =>
-    float pl = ta.pivotlow(low, _left, _right)
-    float prev = ta.valuewhen(not na(pl), pl, 1)
-    bool matched = not na(pl) and not na(prev) and math.abs(pl - prev) <= ta.atr(14) * _tolAtr
-    float eq = matched ? (pl + prev) * 0.5 : na
-    ta.valuewhen(not na(eq), eq, 0)
+     float pl = ta.pivotlow(low, _left, _right)
+     float prev = ta.valuewhen(not na(pl), pl, 1)
+     bool matched = not na(pl) and not na(prev) and math.abs(pl - prev) <= ta.atr(14) * _tolAtr
+     float eq = matched ? (pl + prev) * 0.5 : na
+     ta.valuewhen(not na(eq), eq, 0)
 
 f_pivot_high(_left, _right, _occurrence) =>
-    float ph = ta.pivothigh(high, _left, _right)
-    ta.valuewhen(not na(ph), ph, _occurrence)
+     float ph = ta.pivothigh(high, _left, _right)
+     ta.valuewhen(not na(ph), ph, _occurrence)
 
 f_bear_fvg(_occurrence) =>
-    bool cond = high < low[2]
-    float top = ta.valuewhen(cond, low[2], _occurrence)
-    float bottom = ta.valuewhen(cond, high, _occurrence)
-    int started = ta.valuewhen(cond, time, _occurrence)
-    [top, bottom, started]
+     bool cond = high < low[2]
+     float top = ta.valuewhen(cond, low[2], _occurrence)
+     float bottom = ta.valuewhen(cond, high, _occurrence)
+     int started = ta.valuewhen(cond, time, _occurrence)
+     [top, bottom, started]
 
 f_bull_fvg(_occurrence) =>
-    bool cond = low > high[2]
-    float top = ta.valuewhen(cond, low, _occurrence)
-    float bottom = ta.valuewhen(cond, high[2], _occurrence)
-    int started = ta.valuewhen(cond, time, _occurrence)
-    [top, bottom, started]
+     bool cond = low > high[2]
+     float top = ta.valuewhen(cond, low, _occurrence)
+     float bottom = ta.valuewhen(cond, high[2], _occurrence)
+     int started = ta.valuewhen(cond, time, _occurrence)
+     [top, bottom, started]
 
 // Bearish BOS proxy:
 // 1) A confirmed pivot high is raided.
 // 2) The last confirmed swing low is armed.
 // 3) Price closes below that low with a recent bearish FVG.
 f_bear_bos(_left, _right) =>
-    float ph = ta.pivothigh(high, _left, _right)
-    float pl = ta.pivotlow(low, _left, _right)
+     float ph = ta.pivothigh(high, _left, _right)
+     float pl = ta.pivotlow(low, _left, _right)
 
-    var float lastPh = na
-    var float lastPl = na
-    var float usedPh = na
-    var float armedLow = na
-    var float bos = na
+     var float lastPh = na
+     var float lastPl = na
+     var float usedPh = na
+     var float armedLow = na
+     var float bos = na
 
-    if not na(ph)
-        lastPh := ph
-    if not na(pl)
-        lastPl := pl
+     if not na(ph)
+         lastPh := ph
+     if not na(pl)
+         lastPl := pl
 
-    bool freshRaid = not na(lastPh) and high > lastPh and (na(usedPh) or lastPh != usedPh)
-    if freshRaid and not na(lastPl)
-        usedPh := lastPh
-        armedLow := lastPl
+     bool freshRaid = not na(lastPh) and high > lastPh and (na(usedPh) or lastPh != usedPh)
+     if freshRaid and not na(lastPl)
+         usedPh := lastPh
+         armedLow := lastPl
 
-    bool bearFvg = high < low[2]
-    bool recentBearFvg = bearFvg or bearFvg[1]
-    if not na(armedLow) and close < armedLow and recentBearFvg
-        bos := armedLow
-        armedLow := na
+     bool bearFvg = high < low[2]
+     bool recentBearFvg = bearFvg or bearFvg[1]
+     if not na(armedLow) and close < armedLow and recentBearFvg
+         bos := armedLow
+         armedLow := na
 
-    bos
+     bos
 
 // Bullish BOS proxy:
 // 1) A confirmed pivot low is raided.
 // 2) The last confirmed swing high is armed.
 // 3) Price closes above that high with a recent bullish FVG.
 f_bull_bos(_left, _right) =>
-    float ph = ta.pivothigh(high, _left, _right)
-    float pl = ta.pivotlow(low, _left, _right)
+     float ph = ta.pivothigh(high, _left, _right)
+     float pl = ta.pivotlow(low, _left, _right)
 
-    var float lastPh = na
-    var float lastPl = na
-    var float usedPl = na
-    var float armedHigh = na
-    var float bos = na
+     var float lastPh = na
+     var float lastPl = na
+     var float usedPl = na
+     var float armedHigh = na
+     var float bos = na
 
-    if not na(ph)
-        lastPh := ph
-    if not na(pl)
-        lastPl := pl
+     if not na(ph)
+         lastPh := ph
+     if not na(pl)
+         lastPl := pl
 
-    bool freshRaid = not na(lastPl) and low < lastPl and (na(usedPl) or lastPl != usedPl)
-    if freshRaid and not na(lastPh)
-        usedPl := lastPl
-        armedHigh := lastPh
+     bool freshRaid = not na(lastPl) and low < lastPl and (na(usedPl) or lastPl != usedPl)
+     if freshRaid and not na(lastPh)
+         usedPl := lastPl
+         armedHigh := lastPh
 
-    bool bullFvg = low > high[2]
-    bool recentBullFvg = bullFvg or bullFvg[1]
-    if not na(armedHigh) and close > armedHigh and recentBullFvg
-        bos := armedHigh
-        armedHigh := na
+     bool bullFvg = low > high[2]
+     bool recentBullFvg = bullFvg or bullFvg[1]
+     if not na(armedHigh) and close > armedHigh and recentBullFvg
+         bos := armedHigh
+         armedHigh := na
 
-    bos
+     bos
 
 f_minor_buyside(_lookback, _left, _right) =>
-    float majorHi = ta.highest(high, _lookback)
-    float ph = ta.pivothigh(high, _left, _right)
-    bool nested = not na(ph) and ph < majorHi
-    ta.valuewhen(nested, ph, 0)
+     float majorHi = ta.highest(high, _lookback)
+     float ph = ta.pivothigh(high, _left, _right)
+     bool nested = not na(ph) and ph < majorHi
+     ta.valuewhen(nested, ph, 0)
 
 f_daily_pack(_lookback) =>
-    float hi = ta.highest(high, _lookback)
-    float lo = ta.lowest(low, _lookback)
-    int lookbackTime = time[_lookback]
-    [hi, lo, lookbackTime]
+     float hi = ta.highest(high, _lookback)
+     float lo = ta.lowest(low, _lookback)
+     int lookbackTime = time[_lookback]
+     [hi, lo, lookbackTime]
 
 f_breakaway_gap(_lookback) =>
-    float priorHi = ta.highest(high[1], _lookback)
-    float priorLo = ta.lowest(low[1], _lookback)
-    float mid = priorLo + (priorHi - priorLo) * 0.5
-    bool bullGap = low > high[2]
-    bool displaced = bullGap and close > mid and close[1] <= mid
-    float top = ta.valuewhen(displaced, low, 0)
-    float bottom = ta.valuewhen(displaced, high[2], 0)
-    int started = ta.valuewhen(displaced, time, 0)
-    [top, bottom, started]
+     float priorHi = ta.highest(high[1], _lookback)
+     float priorLo = ta.lowest(low[1], _lookback)
+     float mid = priorLo + (priorHi - priorLo) * 0.5
+     bool bullGap = low > high[2]
+     bool displaced = bullGap and close > mid and close[1] <= mid
+     float top = ta.valuewhen(displaced, low, 0)
+     float bottom = ta.valuewhen(displaced, high[2], 0)
+     int started = ta.valuewhen(displaced, time, 0)
+     [top, bottom, started]
 
 f_imbalance_below_equal_lows(_left, _right, _tolAtr) =>
-    float pl = ta.pivotlow(low, _left, _right)
-    float prev = ta.valuewhen(not na(pl), pl, 1)
-    bool matched = not na(pl) and not na(prev) and math.abs(pl - prev) <= ta.atr(14) * _tolAtr
-    float newEq = matched ? (pl + prev) * 0.5 : na
-    float eq = ta.valuewhen(not na(newEq), newEq, 0)
+     float pl = ta.pivotlow(low, _left, _right)
+     float prev = ta.valuewhen(not na(pl), pl, 1)
+     bool matched = not na(pl) and not na(prev) and math.abs(pl - prev) <= ta.atr(14) * _tolAtr
+     float newEq = matched ? (pl + prev) * 0.5 : na
+     float eq = ta.valuewhen(not na(newEq), newEq, 0)
 
-    bool bearGap = not na(eq) and high < low[2] and low[2] < eq
-    bool bullGap = not na(eq) and low > high[2] and low < eq
-    bool cond = bearGap or bullGap
+     bool bearGap = not na(eq) and high < low[2] and low[2] < eq
+     bool bullGap = not na(eq) and low > high[2] and low < eq
+     bool cond = bearGap or bullGap
 
-    float candidateTop = bearGap ? low[2] : bullGap ? low : na
-    float candidateBottom = bearGap ? high : bullGap ? high[2] : na
+     float candidateTop = bearGap ? low[2] : bullGap ? low : na
+     float candidateBottom = bearGap ? high : bullGap ? high[2] : na
 
-    float top = ta.valuewhen(cond, candidateTop, 0)
-    float bottom = ta.valuewhen(cond, candidateBottom, 0)
-    int started = ta.valuewhen(cond, time, 0)
-    [top, bottom, started]
+     float top = ta.valuewhen(cond, candidateTop, 0)
+     float bottom = ta.valuewhen(cond, candidateBottom, 0)
+     int started = ta.valuewhen(cond, time, 0)
+     [top, bottom, started]
 
 // Bearish 4H breaker proxy:
 // Raid a confirmed high, then close below the armed swing low.
 // The zone is the last up-close candle before the break.
 f_bear_breaker(_left, _right) =>
-    float ph = ta.pivothigh(high, _left, _right)
-    float pl = ta.pivotlow(low, _left, _right)
+     float ph = ta.pivothigh(high, _left, _right)
+     float pl = ta.pivotlow(low, _left, _right)
 
-    var float lastPh = na
-    var float lastPl = na
-    var float usedPh = na
-    var float armedLow = na
-    var float candidateTop = na
-    var float candidateBottom = na
+     var float lastPh = na
+     var float lastPl = na
+     var float usedPh = na
+     var float armedLow = na
+     var float candidateTop = na
+     var float candidateBottom = na
 
-    var float zoneTop = na
-    var float zoneBottom = na
-    var int zoneTime = na
+     var float zoneTop = na
+     var float zoneBottom = na
+     var int zoneTime = na
 
-    if not na(ph)
-        lastPh := ph
-    if not na(pl)
-        lastPl := pl
+     if not na(ph)
+         lastPh := ph
+     if not na(pl)
+         lastPl := pl
 
-    bool freshRaid = not na(lastPh) and high > lastPh and (na(usedPh) or lastPh != usedPh)
-    if freshRaid and not na(lastPl)
-        usedPh := lastPh
-        armedLow := lastPl
-        candidateTop := close >= open ? high : na
-        candidateBottom := close >= open ? low : na
+     bool freshRaid = not na(lastPh) and high > lastPh and (na(usedPh) or lastPh != usedPh)
+     if freshRaid and not na(lastPl)
+         usedPh := lastPh
+         armedLow := lastPl
+         candidateTop := close >= open ? high : na
+         candidateBottom := close >= open ? low : na
 
-    if not na(armedLow) and close >= open
-        candidateTop := high
-        candidateBottom := low
+     if not na(armedLow) and close >= open
+         candidateTop := high
+         candidateBottom := low
 
-    if not na(armedLow) and close < armedLow and not na(candidateTop)
-        zoneTop := candidateTop
-        zoneBottom := candidateBottom
-        zoneTime := time
-        armedLow := na
+     if not na(armedLow) and close < armedLow and not na(candidateTop)
+         zoneTop := candidateTop
+         zoneBottom := candidateBottom
+         zoneTime := time
+         armedLow := na
 
-    [zoneTop, zoneBottom, zoneTime]
+     [zoneTop, zoneBottom, zoneTime]
 
 // Bullish mirror:
 // Raid a confirmed low, then close above the armed swing high.
 // The zone is the last down-close candle before the break.
 f_bull_breaker(_left, _right) =>
-    float ph = ta.pivothigh(high, _left, _right)
-    float pl = ta.pivotlow(low, _left, _right)
+     float ph = ta.pivothigh(high, _left, _right)
+     float pl = ta.pivotlow(low, _left, _right)
 
-    var float lastPh = na
-    var float lastPl = na
-    var float usedPl = na
-    var float armedHigh = na
-    var float candidateTop = na
-    var float candidateBottom = na
+     var float lastPh = na
+     var float lastPl = na
+     var float usedPl = na
+     var float armedHigh = na
+     var float candidateTop = na
+     var float candidateBottom = na
 
-    var float zoneTop = na
-    var float zoneBottom = na
-    var int zoneTime = na
+     var float zoneTop = na
+     var float zoneBottom = na
+     var int zoneTime = na
 
-    if not na(ph)
-        lastPh := ph
-    if not na(pl)
-        lastPl := pl
+     if not na(ph)
+         lastPh := ph
+     if not na(pl)
+         lastPl := pl
 
-    bool freshRaid = not na(lastPl) and low < lastPl and (na(usedPl) or lastPl != usedPl)
-    if freshRaid and not na(lastPh)
-        usedPl := lastPl
-        armedHigh := lastPh
-        candidateTop := close <= open ? high : na
-        candidateBottom := close <= open ? low : na
+     bool freshRaid = not na(lastPl) and low < lastPl and (na(usedPl) or lastPl != usedPl)
+     if freshRaid and not na(lastPh)
+         usedPl := lastPl
+         armedHigh := lastPh
+         candidateTop := close <= open ? high : na
+         candidateBottom := close <= open ? low : na
 
-    if not na(armedHigh) and close <= open
-        candidateTop := high
-        candidateBottom := low
+     if not na(armedHigh) and close <= open
+         candidateTop := high
+         candidateBottom := low
 
-    if not na(armedHigh) and close > armedHigh and not na(candidateTop)
-        zoneTop := candidateTop
-        zoneBottom := candidateBottom
-        zoneTime := time
-        armedHigh := na
+     if not na(armedHigh) and close > armedHigh and not na(candidateTop)
+         zoneTop := candidateTop
+         zoneBottom := candidateBottom
+         zoneTime := time
+         armedHigh := na
 
-    [zoneTop, zoneBottom, zoneTime]
+     [zoneTop, zoneBottom, zoneTime]
 
 // Sunday 18:00 through Monday 00:00 opening range, calculated on 1H bars.
 f_sunday_monday_range(_timezone) =>
-    int d = dayofweek(time, _timezone)
-    int h = hour(time, _timezone)
+     int d = dayofweek(time, _timezone)
+     int h = hour(time, _timezone)
 
-    bool isStart = d == dayofweek.sunday and h == 18
-    bool isEnd = d == dayofweek.monday and h == 0
+     bool isStart = d == dayofweek.sunday and h == 18
+     bool isEnd = d == dayofweek.monday and h == 0
 
-    var bool active = false
-    var float rangeHigh = na
-    var float rangeLow = na
-    var int startTime = na
-    var int endTime = na
+     var bool active = false
+     var float rangeHigh = na
+     var float rangeLow = na
+     var int startTime = na
+     var int endTime = na
 
-    if isStart
-        active := true
-        rangeHigh := high
-        rangeLow := low
-        startTime := time
-        endTime := na
-    else if active and isEnd
-        active := false
-        endTime := time
-    else if active
-        rangeHigh := math.max(rangeHigh, high)
-        rangeLow := math.min(rangeLow, low)
+     if isStart
+         active := true
+         rangeHigh := high
+         rangeLow := low
+         startTime := time
+         endTime := na
+     else if active and isEnd
+         active := false
+         endTime := time
+     else if active
+         rangeHigh := math.max(rangeHigh, high)
+         rangeLow := math.min(rangeLow, low)
 
-    int effectiveEnd = active ? time_close : endTime
-    [rangeHigh, rangeLow, startTime, effectiveEnd]
+     int effectiveEnd = active ? time_close : endTime
+     [rangeHigh, rangeLow, startTime, effectiveEnd]
 
 //==============================================================================
 // Drawing helpers
@@ -376,239 +377,247 @@ f_sunday_monday_range(_timezone) =>
 
 f_draw_level(array<line> _lines, array<label> _labels, int _idx, bool _show,
      int _x1, int _x2, float _y, string _text, color _color, int _width, _style) =>
-    line ln = array.get(_lines, _idx)
-    label lb = array.get(_labels, _idx)
-    bool valid = _show and not na(_y)
+     line ln = array.get(_lines, _idx)
+     label lb = array.get(_labels, _idx)
+     bool valid = _show and not na(_y)
 
-    if valid
-        if na(ln)
-            ln := line.new(x1=_x1, y1=_y, x2=_x2, y2=_y, xloc=xloc.bar_index,
-                 color=_color, width=_width, style=_style)
-            array.set(_lines, _idx, ln)
-        else
-            line.set_xy1(ln, _x1, _y)
-            line.set_xy2(ln, _x2, _y)
-            line.set_color(ln, _color)
-            line.set_width(ln, _width)
-            line.set_style(ln, _style)
+     if valid
+         if na(ln)
+             ln := line.new(x1=_x1, y1=_y, x2=_x2, y2=_y, xloc=xloc.bar_index,
+                  color=_color, width=_width, style=_style)
+             array.set(_lines, _idx, ln)
+         else
+             line.set_xy1(ln, _x1, _y)
+             line.set_xy2(ln, _x2, _y)
+             line.set_color(ln, _color)
+             line.set_width(ln, _width)
+             line.set_style(ln, _style)
 
-        if na(lb)
-            lb := label.new(x=_x2, y=_y, text=_text, xloc=xloc.bar_index,
-                 style=label.style_label_left, color=color.new(color.black, 72),
-                 textcolor=_color, size=size.tiny)
-            array.set(_labels, _idx, lb)
-        else
-            label.set_x(lb, _x2)
-            label.set_y(lb, _y)
-            label.set_text(lb, _text)
-            label.set_textcolor(lb, _color)
-            label.set_color(lb, color.new(color.black, 72))
-    else
-        if not na(ln)
-            line.delete(ln)
-            array.set(_lines, _idx, na)
-        if not na(lb)
-            label.delete(lb)
-            array.set(_labels, _idx, na)
+         if na(lb)
+             lb := label.new(x=_x2, y=_y, text=_text, xloc=xloc.bar_index,
+                  style=label.style_label_left, color=color.new(color.black, 72),
+                  textcolor=_color, size=size.tiny)
+             array.set(_labels, _idx, lb)
+         else
+             label.set_x(lb, _x2)
+             label.set_y(lb, _y)
+             label.set_text(lb, _text)
+             label.set_textcolor(lb, _color)
+             label.set_color(lb, color.new(color.black, 72))
+     else
+         if not na(ln)
+             line.delete(ln)
+             array.set(_lines, _idx, na)
+         if not na(lb)
+             label.delete(lb)
+             array.set(_labels, _idx, na)
 
 f_draw_drt(array<box> _boxes, array<line> _lines, bool _show,
      int _x1, int _x2, float _low, float _high, string _title) =>
-    bool valid = _show and not na(_low) and not na(_high) and _high > _low
-    float drtRange = _high - _low
+     bool valid = _show and not na(_low) and not na(_high) and _high > _low
+     float drtRange = _high - _low
 
-    for i = 0 to 3
-        box bx = array.get(_boxes, i)
-        if valid
-            float bottom = _low + drtRange * (i * 0.25)
-            float top = _low + drtRange * ((i + 1) * 0.25)
-            color bandFill = i == 0 ? color.new(color.yellow, 90) :
-                 i == 1 ? color.new(color.green, 90) :
-                 i == 2 ? color.new(color.blue, 90) :
-                 color.new(color.gray, 92)
-            string bandText = i == 3 ? _title + "\n0.75-1.00" :
-                 i == 2 ? "0.50-0.75" :
-                 i == 1 ? "0.25-0.50" : "0.00-0.25"
+     for i = 0 to 3
+         box bx = array.get(_boxes, i)
+         if valid
+             float bottom = _low + drtRange * (i * 0.25)
+             float top = _low + drtRange * ((i + 1) * 0.25)
+             color bandFill = i == 0 ? color.new(color.yellow, 90) :
+                  i == 1 ? color.new(color.green, 90) :
+                  i == 2 ? color.new(color.blue, 90) :
+                  color.new(color.gray, 92)
+             string bandText = i == 3 ? _title + "\n0.75-1.00" :
+                  i == 2 ? "0.50-0.75" :
+                  i == 1 ? "0.25-0.50" : "0.00-0.25"
 
-            if na(bx)
-                bx := box.new(left=_x1, top=top, right=_x2, bottom=bottom,
-                     xloc=xloc.bar_index, border_color=color.new(color.white, 35),
-                     bgcolor=bandFill, text=bandText, text_color=color.new(color.white, 15),
-                     text_size=size.tiny)
-                array.set(_boxes, i, bx)
-            else
-                box.set_left(bx, _x1)
-                box.set_right(bx, _x2)
-                box.set_top(bx, top)
-                box.set_bottom(bx, bottom)
-                box.set_border_color(bx, color.new(color.white, 35))
-                box.set_bgcolor(bx, bandFill)
-                box.set_text(bx, bandText)
-                box.set_text_color(bx, color.new(color.white, 15))
-        else
-            if not na(bx)
-                box.delete(bx)
-                array.set(_boxes, i, na)
+             if na(bx)
+                 bx := box.new(left=_x1, top=top, right=_x2, bottom=bottom,
+                      xloc=xloc.bar_index, border_color=color.new(color.white, 35),
+                      bgcolor=bandFill, text=bandText, text_color=color.new(color.white, 15),
+                      text_size=size.tiny)
+                 array.set(_boxes, i, bx)
+             else
+                 box.set_left(bx, _x1)
+                 box.set_right(bx, _x2)
+                 box.set_top(bx, top)
+                 box.set_bottom(bx, bottom)
+                 box.set_border_color(bx, color.new(color.white, 35))
+                 box.set_bgcolor(bx, bandFill)
+                 box.set_text(bx, bandText)
+                 box.set_text_color(bx, color.new(color.white, 15))
+         else
+             if not na(bx)
+                 box.delete(bx)
+                 array.set(_boxes, i, na)
 
-    for i = 0 to 4
-        line ln = array.get(_lines, i)
-        if valid
-            float y = _low + drtRange * (i * 0.25)
-            color clr = i == 1 ? color.yellow :
-                 i == 2 ? color.green :
-                 i == 3 ? color.blue : color.white
-            if na(ln)
-                ln := line.new(x1=_x1, y1=y, x2=_x2, y2=y, xloc=xloc.bar_index,
-                     color=clr, width=i == 0 or i == 4 ? 2 : 1)
-                array.set(_lines, i, ln)
-            else
-                line.set_xy1(ln, _x1, y)
-                line.set_xy2(ln, _x2, y)
-                line.set_color(ln, clr)
-                line.set_width(ln, i == 0 or i == 4 ? 2 : 1)
-        else
-            if not na(ln)
-                line.delete(ln)
-                array.set(_lines, i, na)
+     for i = 0 to 4
+         line ln = array.get(_lines, i)
+         if valid
+             float y = _low + drtRange * (i * 0.25)
+             color clr = i == 1 ? color.yellow :
+                  i == 2 ? color.green :
+                  i == 3 ? color.blue : color.white
+             if na(ln)
+                 ln := line.new(x1=_x1, y1=y, x2=_x2, y2=y, xloc=xloc.bar_index,
+                      color=clr, width=i == 0 or i == 4 ? 2 : 1)
+                 array.set(_lines, i, ln)
+             else
+                 line.set_xy1(ln, _x1, y)
+                 line.set_xy2(ln, _x2, y)
+                 line.set_color(ln, clr)
+                 line.set_width(ln, i == 0 or i == 4 ? 2 : 1)
+         else
+             if not na(ln)
+                 line.delete(ln)
+                 array.set(_lines, i, na)
 
 // Convert a Unix timestamp (ms) to the nearest bar_index.
 // Uses the current bar as anchor so that both past and future times map
 // correctly regardless of zoom level or vertical-axis lock.
-// Guard against zero/negative MS_PER_BAR (e.g. tick charts).
+// Guard against zero/negative MS_PER_BAR (e.g. tick charts) and extreme
+// offsets beyond MAX_BAR_OFFSET to prevent Pine Script errors.
 f_bar_from_time(int t) =>
-    not na(t) and MS_PER_BAR > 0 ? bar_index + math.round((t - time) / MS_PER_BAR) : na
+     if not na(t) and MS_PER_BAR > 0
+         float offset = (t - time) / MS_PER_BAR
+         int barOffset = math.round(offset)
+         // Clamp to safe range to prevent "bar index too far from current bar" errors
+         int clamped = math.max(-MAX_BAR_OFFSET, math.min(MAX_BAR_OFFSET, barOffset))
+         bar_index + clamped
+     else
+         na
 
 f_draw_time_zone(array<box> _boxes, array<line> _mids, int _idx, bool _show,
      int _leftTime, int _rightTime, float _top, float _bottom, string _text,
      color _border, color _fill) =>
-    box bx = array.get(_boxes, _idx)
-    line mid = array.get(_mids, _idx)
-    bool valid = _show and not na(_leftTime) and not na(_rightTime) and
-         not na(_top) and not na(_bottom) and _top > _bottom
+     box bx = array.get(_boxes, _idx)
+     line mid = array.get(_mids, _idx)
+     bool valid = _show and not na(_leftTime) and not na(_rightTime) and
+          not na(_top) and not na(_bottom) and _top > _bottom
 
-    if valid
-        int leftBar = f_bar_from_time(_leftTime)
-        int rightBar = f_bar_from_time(_rightTime)
-        float middle = (_top + _bottom) * 0.5
-        if na(bx)
-            bx := box.new(left=leftBar, top=_top, right=rightBar, bottom=_bottom,
-                 xloc=xloc.bar_index, border_color=_border, bgcolor=_fill,
-                 text=_text, text_color=color.white, text_size=size.tiny)
-            array.set(_boxes, _idx, bx)
-        else
-            box.set_left(bx, leftBar)
-            box.set_right(bx, rightBar)
-            box.set_top(bx, _top)
-            box.set_bottom(bx, _bottom)
-            box.set_border_color(bx, _border)
-            box.set_bgcolor(bx, _fill)
-            box.set_text(bx, _text)
-            box.set_text_color(bx, color.white)
+     if valid
+         int leftBar = f_bar_from_time(_leftTime)
+         int rightBar = f_bar_from_time(_rightTime)
+         float middle = (_top + _bottom) * 0.5
+         if na(bx)
+             bx := box.new(left=leftBar, top=_top, right=rightBar, bottom=_bottom,
+                  xloc=xloc.bar_index, border_color=_border, bgcolor=_fill,
+                  text=_text, text_color=color.white, text_size=size.tiny)
+             array.set(_boxes, _idx, bx)
+         else
+             box.set_left(bx, leftBar)
+             box.set_right(bx, rightBar)
+             box.set_top(bx, _top)
+             box.set_bottom(bx, _bottom)
+             box.set_border_color(bx, _border)
+             box.set_bgcolor(bx, _fill)
+             box.set_text(bx, _text)
+             box.set_text_color(bx, color.white)
 
-        if na(mid)
-            mid := line.new(x1=leftBar, y1=middle, x2=rightBar, y2=middle,
-                 xloc=xloc.bar_index, color=color.new(_border, 5),
-                 style=line.style_dashed, width=1)
-            array.set(_mids, _idx, mid)
-        else
-            line.set_xy1(mid, leftBar, middle)
-            line.set_xy2(mid, rightBar, middle)
-            line.set_color(mid, color.new(_border, 5))
-            line.set_style(mid, line.style_dashed)
-    else
-        if not na(bx)
-            box.delete(bx)
-            array.set(_boxes, _idx, na)
-        if not na(mid)
-            line.delete(mid)
-            array.set(_mids, _idx, na)
+         if na(mid)
+             mid := line.new(x1=leftBar, y1=middle, x2=rightBar, y2=middle,
+                  xloc=xloc.bar_index, color=color.new(_border, 5),
+                  style=line.style_dashed, width=1)
+             array.set(_mids, _idx, mid)
+         else
+             line.set_xy1(mid, leftBar, middle)
+             line.set_xy2(mid, rightBar, middle)
+             line.set_color(mid, color.new(_border, 5))
+             line.set_style(mid, line.style_dashed)
+     else
+         if not na(bx)
+             box.delete(bx)
+             array.set(_boxes, _idx, na)
+         if not na(mid)
+             line.delete(mid)
+             array.set(_mids, _idx, na)
 
 f_draw_time_line(array<line> _lines, int _idx, bool _show,
      int _x1, float _y1, int _x2, float _y2, color _color, int _width, _style) =>
-    line ln = array.get(_lines, _idx)
-    bool valid = _show and not na(_x1) and not na(_x2) and not na(_y1) and not na(_y2)
+     line ln = array.get(_lines, _idx)
+     bool valid = _show and not na(_x1) and not na(_x2) and not na(_y1) and not na(_y2)
 
-    if valid
-        int x1Bar = f_bar_from_time(_x1)
-        int x2Bar = f_bar_from_time(_x2)
-        if na(ln)
-            ln := line.new(x1=x1Bar, y1=_y1, x2=x2Bar, y2=_y2, xloc=xloc.bar_index,
-                 color=_color, width=_width, style=_style)
-            array.set(_lines, _idx, ln)
-        else
-            line.set_xy1(ln, x1Bar, _y1)
-            line.set_xy2(ln, x2Bar, _y2)
-            line.set_color(ln, _color)
-            line.set_width(ln, _width)
-            line.set_style(ln, _style)
-    else
-        if not na(ln)
-            line.delete(ln)
-            array.set(_lines, _idx, na)
+     if valid
+         int x1Bar = f_bar_from_time(_x1)
+         int x2Bar = f_bar_from_time(_x2)
+         if na(ln)
+             ln := line.new(x1=x1Bar, y1=_y1, x2=x2Bar, y2=_y2, xloc=xloc.bar_index,
+                  color=_color, width=_width, style=_style)
+             array.set(_lines, _idx, ln)
+         else
+             line.set_xy1(ln, x1Bar, _y1)
+             line.set_xy2(ln, x2Bar, _y2)
+             line.set_color(ln, _color)
+             line.set_width(ln, _width)
+             line.set_style(ln, _style)
+     else
+         if not na(ln)
+             line.delete(ln)
+             array.set(_lines, _idx, na)
 
 f_draw_projection(array<box> _boxes, array<line> _mids, bool _show,
      bool _above, int _count, int _leftTime, int _rightTime,
      float _rangeLow, float _rangeSize) =>
-    int leftBar = f_bar_from_time(_leftTime)
-    int rightBar = f_bar_from_time(_rightTime)
-    for i = 0 to 5
-        box bx = array.get(_boxes, i)
-        line mid = array.get(_mids, i)
-        bool activeZone = _show and i < _count and not na(_leftTime) and
-             not na(_rightTime) and not na(_rangeLow) and _rangeSize > 0
+     int leftBar = f_bar_from_time(_leftTime)
+     int rightBar = f_bar_from_time(_rightTime)
+     for i = 0 to 5
+         box bx = array.get(_boxes, i)
+         line mid = array.get(_mids, i)
+         bool activeZone = _show and i < _count and not na(_leftTime) and
+              not na(_rightTime) and not na(_rangeLow) and _rangeSize > 0
 
-        if activeZone
-            float bottom = _above ?
-                 _rangeLow + _rangeSize * i :
-                 _rangeLow - _rangeSize * (i + 1)
-            float top = _above ?
-                 _rangeLow + _rangeSize * (i + 1) :
-                 _rangeLow - _rangeSize * i
-            float middle = (top + bottom) * 0.5
-            string zoneLabel = (_above ? "Zone " : "Sell Zone ") + str.tostring(i + 1)
+         if activeZone
+             float bottom = _above ?
+                  _rangeLow + _rangeSize * i :
+                  _rangeLow - _rangeSize * (i + 1)
+             float top = _above ?
+                  _rangeLow + _rangeSize * (i + 1) :
+                  _rangeLow - _rangeSize * i
+             float middle = (top + bottom) * 0.5
+             string zoneLabel = (_above ? "Zone " : "Sell Zone ") + str.tostring(i + 1)
 
-            if na(bx)
-                bx := box.new(left=leftBar, top=top, right=rightBar, bottom=bottom,
-                     xloc=xloc.bar_index, border_color=color.new(color.white, 25),
-                     bgcolor=color.new(color.white, 93), text=zoneLabel,
-                     text_color=color.new(color.white, 5), text_size=size.tiny)
-                array.set(_boxes, i, bx)
-            else
-                box.set_left(bx, leftBar)
-                box.set_right(bx, rightBar)
-                box.set_top(bx, top)
-                box.set_bottom(bx, bottom)
-                box.set_text(bx, zoneLabel)
-                box.set_border_color(bx, color.new(color.white, 25))
-                box.set_bgcolor(bx, color.new(color.white, 93))
+             if na(bx)
+                 bx := box.new(left=leftBar, top=top, right=rightBar, bottom=bottom,
+                      xloc=xloc.bar_index, border_color=color.new(color.white, 25),
+                      bgcolor=color.new(color.white, 93), text=zoneLabel,
+                      text_color=color.new(color.white, 5), text_size=size.tiny)
+                 array.set(_boxes, i, bx)
+             else
+                 box.set_left(bx, leftBar)
+                 box.set_right(bx, rightBar)
+                 box.set_top(bx, top)
+                 box.set_bottom(bx, bottom)
+                 box.set_text(bx, zoneLabel)
+                 box.set_border_color(bx, color.new(color.white, 25))
+                 box.set_bgcolor(bx, color.new(color.white, 93))
 
-            if na(mid)
-                mid := line.new(x1=leftBar, y1=middle, x2=rightBar, y2=middle,
-                     xloc=xloc.bar_index, color=color.new(color.white, 15),
-                     style=line.style_dashed)
-                array.set(_mids, i, mid)
-            else
-                line.set_xy1(mid, leftBar, middle)
-                line.set_xy2(mid, rightBar, middle)
-                line.set_color(mid, color.new(color.white, 15))
-                line.set_style(mid, line.style_dashed)
-        else
-            if not na(bx)
-                box.delete(bx)
-                array.set(_boxes, i, na)
-            if not na(mid)
-                line.delete(mid)
-                array.set(_mids, i, na)
+             if na(mid)
+                 mid := line.new(x1=leftBar, y1=middle, x2=rightBar, y2=middle,
+                      xloc=xloc.bar_index, color=color.new(color.white, 15),
+                      style=line.style_dashed)
+                 array.set(_mids, i, mid)
+             else
+                 line.set_xy1(mid, leftBar, middle)
+                 line.set_xy2(mid, rightBar, middle)
+                 line.set_color(mid, color.new(color.white, 15))
+                 line.set_style(mid, line.style_dashed)
+         else
+             if not na(bx)
+                 box.delete(bx)
+                 array.set(_boxes, i, na)
+             if not na(mid)
+                 line.delete(mid)
+                 array.set(_mids, i, na)
 
 f_grade(_price, _low, _high) =>
-    string result = "n/a"
-    if not na(_price) and not na(_low) and not na(_high) and _high > _low
-        float p = (_price - _low) / (_high - _low)
-        result := p >= 1.0 ? "Above 1.00" :
-             p >= 0.75 ? "0.75-1.00" :
-             p >= 0.50 ? "0.50-0.75" :
-             p >= 0.25 ? "0.25-0.50" :
-             p >= 0.00 ? "0.00-0.25" : "Below 0.00"
-    result
+     string result = "n/a"
+     if not na(_price) and not na(_low) and not na(_high) and _high > _low
+         float p = (_price - _low) / (_high - _low)
+         result := p >= 1.0 ? "Above 1.00" :
+              p >= 0.75 ? "0.75-1.00" :
+              p >= 0.50 ? "0.50-0.75" :
+              p >= 0.25 ? "0.25-0.50" :
+              p >= 0.00 ? "0.00-0.25" : "Below 0.00"
+     result
 
 //==============================================================================
 // Higher-timeframe data
@@ -931,35 +940,35 @@ var table dash = table.new(position.top_right, 2, dashboardRows,
      frame_width=1, border_color=color.new(color.white, 80), border_width=1)
 
 if barstate.islast
-    if showDashboard
-        table.cell(dash, 0, 0, "SNAP HTF_LTF", text_color=color.white,
-             bgcolor=color.new(color.blue, 55))
-        table.cell(dash, 1, 0, syminfo.ticker, text_color=color.white,
-             bgcolor=color.new(color.blue, 55))
+     if showDashboard
+         table.cell(dash, 0, 0, "SNAP HTF_LTF", text_color=color.white,
+              bgcolor=color.new(color.blue, 55))
+         table.cell(dash, 1, 0, syminfo.ticker, text_color=color.white,
+              bgcolor=color.new(color.blue, 55))
 
-        table.cell(dash, 0, 1, "Weekly range")
-        table.cell(dash, 1, 1, weeklyGrade)
+         table.cell(dash, 0, 1, "Weekly range")
+         table.cell(dash, 1, 1, weeklyGrade)
 
-        table.cell(dash, 0, 2, "Daily DRT")
-        table.cell(dash, 1, 2, dailyGrade)
+         table.cell(dash, 0, 2, "Daily DRT")
+         table.cell(dash, 1, 2, dailyGrade)
 
-        table.cell(dash, 0, 3, "Structure proxy")
-        table.cell(dash, 1, 3, biasProxy,
-             text_color=biasProxy == "Buyside control proxy" ? color.lime :
-             biasProxy == "Sell-side control proxy" ? color.red : color.silver)
+         table.cell(dash, 0, 3, "Structure proxy")
+         table.cell(dash, 1, 3, biasProxy,
+              text_color=biasProxy == "Buyside control proxy" ? color.lime :
+              biasProxy == "Sell-side control proxy" ? color.red : color.silver)
 
-        table.cell(dash, 0, 4, "20D lookback")
-        table.cell(dash, 1, 4, showDailyLookback ? "ON" : "OFF",
-             text_color=showDailyLookback ? color.lime : color.gray)
+         table.cell(dash, 0, 4, "20D lookback")
+         table.cell(dash, 1, 4, showDailyLookback ? "ON" : "OFF",
+              text_color=showDailyLookback ? color.lime : color.gray)
 
-        table.cell(dash, 0, 5, "Sunday-Monday OR")
-        table.cell(dash, 1, 5, validOr ? "Mapped" : "Waiting",
-             text_color=validOr ? color.lime : color.orange)
+         table.cell(dash, 0, 5, "Sunday-Monday OR")
+         table.cell(dash, 1, 5, validOr ? "Mapped" : "Waiting",
+              text_color=validOr ? color.lime : color.orange)
 
-        table.cell(dash, 0, 6, "HTF bars")
-        table.cell(dash, 1, 6, "Develop until close", text_color=color.orange)
-    else
-        table.clear(dash, 0, 0, 1, dashboardRows - 1)
+         table.cell(dash, 0, 6, "HTF bars")
+         table.cell(dash, 1, 6, "Develop until close", text_color=color.orange)
+     else
+         table.clear(dash, 0, 0, 1, dashboardRows - 1)
 
 //==============================================================================
 // Alerts
