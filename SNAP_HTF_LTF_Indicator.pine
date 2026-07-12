@@ -119,7 +119,7 @@ if show_daily_imbalance
     hline(daily_imbalance_mid, "Daily Imbalance 50%", color=color.new(color.white, 60), linestyle=hline.style_dotted, linewidth=1)
 
 // 20-Day Lookback Vertical Line
-lookback_days = input(20, "Lookback Days", minval=1, maxval=100, group="Daily Timeframe")
+lookback_days = input.int(20, "Lookback Days", minval=1, maxval=100, group="Daily Timeframe")
 if show_daily_20d_filter
     line.new(bar_index - lookback_days, ta.highest(high, lookback_days * 24), bar_index - lookback_days, ta.lowest(low, lookback_days * 24), color=color.blue, width=2)
     
