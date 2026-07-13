@@ -1,5 +1,5 @@
 //@version=6
-indicator("SNAP HTF_LTF v1.5", shorttitle="SNAP HTF_LTF", overlay=true,
+indicator("SNAP HTF_LTF v1.6", shorttitle="SNAP HTF_LTF", overlay=true,
      max_lines_count=500, max_boxes_count=500, max_labels_count=200,
      max_bars_back=600)
 
@@ -56,6 +56,9 @@ bool showEqualLows      = input.bool(true, "Show equal lows / institutional leve
 bool showBreakawayGap   = input.bool(true, "Show daily breakaway gap proxy", group=G_DAILY)
 bool showBelowEQLGap    = input.bool(true, "Show latest imbalance below equal lows", group=G_DAILY)
 
+int h4Lookback = input.int(30, "4H dealing range lookback (4H bars)",
+     minval=5, maxval=200, group=G_H4)
+bool showH4DRT        = input.bool(true, "Show 4H DRT box", group=G_H4)
 bool showH4FVG        = input.bool(true, "Show 4H buy/sell imbalances", group=G_H4)
 bool showBearBreaker  = input.bool(true, "Show bearish 4H breaker proxy", group=G_H4)
 bool showBullBreaker  = input.bool(false, "Show bullish 4H breaker proxy", group=G_H4)
@@ -79,6 +82,10 @@ int weeklyBoxOffset = input.int(20, "Weekly DRT horizontal offset; negative = le
 int dailyBoxWidth = input.int(55, "Daily DRT width (bars)",
      minval=10, maxval=250, group=G_STYLE)
 int dailyBoxOffset = input.int(-45, "Daily DRT horizontal offset; negative = left",
+     minval=-300, maxval=300, group=G_STYLE)
+int h4BoxWidth = input.int(35, "4H DRT width (bars)",
+     minval=10, maxval=250, group=G_STYLE)
+int h4BoxOffset = input.int(-120, "4H DRT horizontal offset; negative = left",
      minval=-300, maxval=300, group=G_STYLE)
 int zonePastDays = input.int(240, "Trim zone history to latest N calendar days",
      minval=20, maxval=1500, group=G_STYLE)
@@ -126,6 +133,12 @@ f_week_pack_7day() =>
     float wickHi = not na(barsBack) ? high[barsBack] : na
     float wickBase = not na(barsBack) ? math.max(open[barsBack], close[barsBack]) : na
     [majorHi, majorLo, wickHi, wickBase]
+
+f_h4_pack(_lookback) =>
+    // 4-hour dealing range lookback
+    float hi = ta.highest(high, _lookback)
+    float lo = ta.lowest(low, _lookback)
+    [hi, lo]
 
 f_equal_high(_left, _right, _tolAtr) =>
     float ph = ta.pivothigh(high, _left, _right)
@@ -676,6 +689,9 @@ float dEqLow = request.security(syminfo.tickerid, "D",
          gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 // Four hour
+[h4MajorHigh, h4MajorLow] = request.security(syminfo.tickerid, "240", f_h4_pack(h4Lookback),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
 [h4BearTop0, h4BearBottom0, h4BearTime0] = request.security(syminfo.tickerid, "240", f_bear_fvg(0),
          gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [h4BearTop1, h4BearBottom1, h4BearTime1] = request.security(syminfo.tickerid, "240", f_bear_fvg(1),
@@ -708,6 +724,9 @@ var array<line> weeklyDrtLines = array.new_line(5)
 
 var array<box> dailyDrtBoxes = array.new_box(4)
 var array<line> dailyDrtLines = array.new_line(5)
+
+var array<box> h4DrtBoxes = array.new_box(4)
+var array<line> h4DrtLines = array.new_line(5)
 
 var array<box> zoneBoxes = array.new_box(16)
 var array<line> zoneMids = array.new_line(16)
@@ -774,6 +793,13 @@ f_draw_drt(dailyDrtBoxes, dailyDrtLines,
      showDaily and showDailyDRT,
      dailyDrtX1, dailyDrtX2, dMajorLow, dMajorHigh,
      "Daily " + str.tostring(dailyLookback) + "-day DRT")
+
+int h4DrtX2 = bar_index + h4BoxOffset
+int h4DrtX1 = h4DrtX2 - h4BoxWidth
+f_draw_drt(h4DrtBoxes, h4DrtLines,
+     showH4 and showH4DRT,
+     h4DrtX1, h4DrtX2, h4MajorLow, h4MajorHigh,
+     "4H " + str.tostring(h4Lookback) + "-bar DRT")
 
 //==============================================================================
 // Imbalance, breakaway-gap, and breaker zones
@@ -915,13 +941,15 @@ f_draw_projection(belowProjectionBoxes, belowProjectionMids,
 //==============================================================================
 
 float dMid = dMajorLow + (dMajorHigh - dMajorLow) * 0.5
+float h4Mid = h4MajorLow + (h4MajorHigh - h4MajorLow) * 0.5
 string dailyGrade = f_grade(close, dMajorLow, dMajorHigh)
+string h4Grade = f_grade(close, h4MajorLow, h4MajorHigh)
 string weeklyGrade = f_grade(close, w7MajorLow, w7MajorHigh)
 string biasProxy = close > dMid and not na(dBullBos) ? "Buyside Control Proxy" :
      close < dMid and not na(wBearBos) ? "Sell-side Control Proxy" :
      "Mixed / Unconfirmed"
 
-var table dash = table.new(position.top_right, 2, dashboardRows,
+var table dash = table.new(position.top_right, 2, dashboardRows + 1,
      bgcolor=color.new(color.black, 18), frame_color=color.new(color.white, 65),
      frame_width=1, border_color=color.new(color.white, 80), border_width=1)
 
@@ -938,23 +966,26 @@ if barstate.islast
         table.cell(dash, 0, 2, "Daily DRT")
         table.cell(dash, 1, 2, dailyGrade)
 
-        table.cell(dash, 0, 3, "Structure Proxy")
-        table.cell(dash, 1, 3, biasProxy,
+        table.cell(dash, 0, 3, "4H DRT")
+        table.cell(dash, 1, 3, h4Grade)
+
+        table.cell(dash, 0, 4, "Structure Proxy")
+        table.cell(dash, 1, 4, biasProxy,
              text_color=biasProxy == "Buyside Control Proxy" ? color.lime :
              biasProxy == "Sell-side Control Proxy" ? color.red : color.silver)
 
-        table.cell(dash, 0, 4, "7D Lookback")
-        table.cell(dash, 1, 4, showDailyLookback ? "ON" : "OFF",
+        table.cell(dash, 0, 5, "7D Lookback")
+        table.cell(dash, 1, 5, showDailyLookback ? "ON" : "OFF",
              text_color=showDailyLookback ? color.lime : color.gray)
 
-        table.cell(dash, 0, 5, "Sunday-Monday OR")
-        table.cell(dash, 1, 5, validOr ? "Mapped" : "Waiting",
+        table.cell(dash, 0, 6, "Sunday-Monday OR")
+        table.cell(dash, 1, 6, validOr ? "Mapped" : "Waiting",
              text_color=validOr ? color.lime : color.orange)
 
-        table.cell(dash, 0, 6, "HTF Bars")
-        table.cell(dash, 1, 6, "Develop Until Close", text_color=color.orange)
+        table.cell(dash, 0, 7, "HTF Bars")
+        table.cell(dash, 1, 7, "Develop Until Close", text_color=color.orange)
     else
-        table.clear(dash, 0, 0, 1, dashboardRows - 1)
+        table.clear(dash, 0, 0, 1, dashboardRows)
 
 //==============================================================================
 // Alerts
@@ -977,3 +1008,9 @@ alertcondition(ta.crossover(close, w7MajorHigh), "SNAP: Weekly 7-Day Major High 
 
 alertcondition(ta.crossunder(close, w7MajorLow), "SNAP: Weekly 7-Day Major Low Raided",
      "Price crossed below the weekly 7-day major sell-side liquidity pool.")
+
+alertcondition(ta.crossover(close, h4MajorHigh), "SNAP: 4H Major High Raided",
+     "Price crossed above the current 4H major buyside high.")
+
+alertcondition(ta.crossunder(close, h4MajorLow), "SNAP: 4H Major Low Raided",
+     "Price crossed below the current 4H major sell-side low.")
