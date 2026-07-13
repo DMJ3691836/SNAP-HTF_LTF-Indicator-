@@ -60,6 +60,7 @@ int h4Lookback = input.int(30, "4H dealing range lookback (4H bars)",
      minval=5, maxval=200, group=G_H4)
 bool showH4DRT        = input.bool(true, "Show 4H DRT box", group=G_H4)
 bool showH4FVG        = input.bool(true, "Show 4H buy/sell imbalances", group=G_H4)
+bool showH4BreakawayGap = input.bool(true, "Show 4H breakaway gap proxy", group=G_H4)
 bool showBearBreaker  = input.bool(true, "Show bearish 4H breaker proxy", group=G_H4)
 bool showBullBreaker  = input.bool(false, "Show bullish 4H breaker proxy", group=G_H4)
 
@@ -699,6 +700,9 @@ float dEqLow = request.security(syminfo.tickerid, "D",
 [h4BullTop0, h4BullBottom0, h4BullTime0] = request.security(syminfo.tickerid, "240", f_bull_fvg(0),
          gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
+[h4BreakTop, h4BreakBottom, h4BreakTime] = request.security(syminfo.tickerid, "240", f_breakaway_gap(h4Lookback),
+         gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
 [h4BearBreakerTop, h4BearBreakerBottom, h4BearBreakerTime] = request.security(syminfo.tickerid, "240",
          f_bear_breaker(swingLeft, swingRight),
          gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
@@ -839,6 +843,7 @@ int h4LeftBull0 = not na(h4BullTime0) ? math.max(h4BullTime0, zoneLeftLimit) : n
 
 int dBreakLeft = not na(dBreakTime) ? math.max(dBreakTime, zoneLeftLimit) : na
 int dBelowLeft = not na(dBelowTime) ? math.max(dBelowTime, zoneLeftLimit) : na
+int h4BreakLeft = not na(h4BreakTime) ? math.max(h4BreakTime, zoneLeftLimit) : na
 int h4BearBreakerLeft = not na(h4BearBreakerTime) ? math.max(h4BearBreakerTime, zoneLeftLimit) : na
 int h4BullBreakerLeft = not na(h4BullBreakerTime) ? math.max(h4BullBreakerTime, zoneLeftLimit) : na
 
@@ -888,12 +893,17 @@ f_draw_time_zone(zoneBoxes, zoneMids, 10, showDaily and showBelowEQLGap,
      "Imbalance Below Equal Lows", color.white,
      color.new(dailyImbalanceColor, 75))
 
-f_draw_time_zone(zoneBoxes, zoneMids, 11, showH4 and showBearBreaker,
+f_draw_time_zone(zoneBoxes, zoneMids, 11, showH4 and showH4BreakawayGap,
+     h4BreakLeft, zoneRight, h4BreakTop, h4BreakBottom,
+     "Breakaway GAP (4H Proxy)", color.new(breakawayColor, 0),
+     color.new(breakawayColor, 70))
+
+f_draw_time_zone(zoneBoxes, zoneMids, 12, showH4 and showBearBreaker,
      h4BearBreakerLeft, zoneRight, h4BearBreakerTop, h4BearBreakerBottom,
      "4H High-Probability Bearish Breaker", color.white,
      color.new(color.white, 88))
 
-f_draw_time_zone(zoneBoxes, zoneMids, 12, showH4 and showBullBreaker,
+f_draw_time_zone(zoneBoxes, zoneMids, 13, showH4 and showBullBreaker,
      h4BullBreakerLeft, zoneRight, h4BullBreakerTop, h4BullBreakerBottom,
      "4H High-Probability Bullish Breaker", color.white,
      color.new(color.white, 88))
