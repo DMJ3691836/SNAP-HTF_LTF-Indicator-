@@ -722,6 +722,9 @@ var array<label> levelLabels = array.new_label(24)
 var array<box> weeklyDrtBoxes = array.new_box(4)
 var array<line> weeklyDrtLines = array.new_line(5)
 
+var array<box> daily7DayDrtBoxes = array.new_box(4)
+var array<line> daily7DayDrtLines = array.new_line(5)
+
 var array<box> dailyDrtBoxes = array.new_box(4)
 var array<line> dailyDrtLines = array.new_line(5)
 
@@ -780,6 +783,7 @@ f_draw_level(levelLines, levelLabels, 9, showDaily and showMinorBuyside, x1, x2,
 // DRT boxes
 //==============================================================================
 
+// Weekly premium wick DRT (restored)
 int weeklyDrtX2 = bar_index + weeklyBoxOffset
 int weeklyDrtX1 = weeklyDrtX2 - weeklyBoxWidth
 f_draw_drt(weeklyDrtBoxes, weeklyDrtLines,
@@ -787,6 +791,19 @@ f_draw_drt(weeklyDrtBoxes, weeklyDrtLines,
      weeklyDrtX1, weeklyDrtX2, w7WickBase, w7WickHigh,
      "Weekly 7-Day Premium Wick DRT")
 
+// Daily 7-day DRT: anchored to dMinorBuy, height is wLiqHigh1 - dMinorBuy
+float daily7DayDrtAnchor = dMinorBuy
+float daily7DayDrtHeight = not na(wLiqHigh1) and not na(dMinorBuy) ? wLiqHigh1 - dMinorBuy : na
+float daily7DayDrtTop = not na(daily7DayDrtHeight) ? daily7DayDrtAnchor + daily7DayDrtHeight : na
+
+int daily7DayDrtX2 = bar_index + dailyBoxOffset
+int daily7DayDrtX1 = daily7DayDrtX2 - dailyBoxWidth
+f_draw_drt(daily7DayDrtBoxes, daily7DayDrtLines,
+     showDaily and showDailyDRT,
+     daily7DayDrtX1, daily7DayDrtX2, daily7DayDrtAnchor, daily7DayDrtTop,
+     "Daily 7-Day DRT (Anchored to Minor Buyside)")
+
+// Standard daily DRT (for reference)
 int dailyDrtX2 = bar_index + dailyBoxOffset
 int dailyDrtX1 = dailyDrtX2 - dailyBoxWidth
 f_draw_drt(dailyDrtBoxes, dailyDrtLines,
@@ -998,19 +1015,13 @@ alertcondition(ta.crossunder(close, dMid), "SNAP: Daily 0.5 Crossed Downward",
      "Price crossed below the daily dealing-range 0.5 DRT level.")
 
 alertcondition(ta.crossover(close, dMajorHigh), "SNAP: Daily Major High Raided",
-     "Price crossed above the current daily major buyside high.")
+     "Price crossed above the daily dealing-range major high.")
 
 alertcondition(ta.crossunder(close, dMajorLow), "SNAP: Daily Major Low Raided",
-     "Price crossed below the current daily major sell-side low.")
+     "Price crossed below the daily dealing-range major low.")
 
-alertcondition(ta.crossover(close, w7MajorHigh), "SNAP: Weekly 7-Day Major High Raided",
-     "Price crossed above the weekly 7-day major buyside liquidity pool.")
+alertcondition(not na(dBullBos), "SNAP: Daily Bullish BOS Signal",
+     "Daily bullish break-of-structure signal triggered.")
 
-alertcondition(ta.crossunder(close, w7MajorLow), "SNAP: Weekly 7-Day Major Low Raided",
-     "Price crossed below the weekly 7-day major sell-side liquidity pool.")
-
-alertcondition(ta.crossover(close, h4MajorHigh), "SNAP: 4H Major High Raided",
-     "Price crossed above the current 4H major buyside high.")
-
-alertcondition(ta.crossunder(close, h4MajorLow), "SNAP: 4H Major Low Raided",
-     "Price crossed below the current 4H major sell-side low.")
+alertcondition(not na(wBearBos), "SNAP: Weekly Bearish BOS Signal",
+     "Weekly bearish break-of-structure signal triggered.")
